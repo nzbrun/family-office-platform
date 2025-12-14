@@ -2,6 +2,76 @@
 
 Backend API construido con NestJS, TypeScript, Prisma y PostgreSQL para un sistema multi-tenant con autenticación JWT y RBAC.
 
+## 🚀 Demo en 5 minutos
+
+### Setup Rápido
+
+1. **Instalar dependencias:**
+```bash
+npm install
+```
+
+2. **Configurar base de datos:**
+```bash
+# Asegúrate de tener PostgreSQL corriendo
+# Configura DATABASE_URL en .env
+```
+
+3. **Ejecutar setup del demo:**
+```bash
+npm run demo:setup
+```
+
+Este comando:
+- Resetea la base de datos
+- Crea usuarios de demo (del seed)
+- Crea dataset completo de inversiones para ambos tenants
+
+4. **Iniciar la aplicación:**
+```bash
+npm run start:dev
+```
+
+### Credenciales Demo
+
+**Tenant A (Demo Family Office):**
+- Admin: `admin@demo.com` / `Demo123!`
+- User: `user@demo.com` / `Demo123!`
+- Super Admin: `superadmin@demo.com` / `Demo123!`
+
+**Tenant B (Demo Family Office B):**
+- Admin: `admin.b@demo.com` / `Demo123!`
+
+### URLs Importantes
+
+- **API Documentation (Swagger):** http://localhost:3000/api
+- **Health Check:** http://localhost:3000/health
+- **Reporting Summary:** http://localhost:3000/reporting/summary (requiere auth)
+- **Assistant Query:** http://localhost:3000/assistant/query (requiere auth + OPENAI_API_KEY)
+
+### Probar el Demo
+
+1. **Login como admin:**
+```bash
+curl -X POST http://localhost:3000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email": "admin@demo.com", "password": "Demo123!"}'
+```
+
+2. **Ver resumen del portfolio:**
+```bash
+curl -X GET http://localhost:3000/reporting/summary \
+  -H "Authorization: Bearer <token-del-paso-1>"
+```
+
+3. **Consultar al asistente** (requiere OPENAI_API_KEY):
+```bash
+curl -X POST http://localhost:3000/assistant/query \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"message": "¿Cuánto vale el portfolio?"}'
+```
+
 ## Stack Tecnológico
 
 - **Framework**: NestJS 11
@@ -822,6 +892,64 @@ Respuesta:
 - Límite de 3 tool calls por query
 - Límite de 50 items en respuestas
 
+## Preguntas Recomendadas al Asistente
+
+El asistente puede responder preguntas sobre el portfolio usando lenguaje natural. Aquí hay 10 ejemplos:
+
+1. **"¿Cuánto vale el portfolio?"**
+   - El asistente usará `reporting_summary` para calcular el total
+
+2. **"¿Cuántos assets tengo sin valuación?"**
+   - Consultará `reporting_assets` con filtro `hasValuation=false`
+
+3. **"Muéstrame todos los assets de tipo EQUITY"**
+   - Filtrará assets por tipo usando `reporting_assets`
+
+4. **"¿Cuál es la valuación más reciente del asset [ID]?"**
+   - Usará `asset_get` para obtener el asset con `latestValuation`
+
+5. **"Muéstrame el historial de valuaciones del asset [ID] desde enero 2024"**
+   - Usará `valuations_list` con filtros de fecha
+
+6. **"¿Cuánto vale el portfolio en USD?"**
+   - Consultará `reporting_summary` y filtrará por currency
+
+7. **"¿Qué assets están asociados a la entidad legal [ID]?"**
+   - Usará `reporting_assets` con filtro `legalEntityId`
+
+8. **"Muéstrame los últimos 5 eventos de auditoría"**
+   - Solo para SUPER_ADMIN/ADMIN, usará `audit_logs`
+
+9. **"¿Cuál es el asset más valioso?"**
+   - Consultará `reporting_assets` y analizará `latestValuation`
+
+10. **"Resume el portfolio por tipo de asset"**
+    - Usará `reporting_summary` para obtener `totalsByAssetType`
+
+**Nota:** El asistente respeta RBAC y multi-tenancy. Cada usuario solo puede acceder a datos de su tenant.
+
+## Scripts Disponibles
+
+### Aplicación
+- `npm run start` - Inicia la aplicación
+- `npm run start:dev` - Inicia en modo desarrollo con watch
+- `npm run start:debug` - Inicia en modo debug
+- `npm run start:prod` - Inicia en modo producción
+- `npm run build` - Compila el proyecto
+
+### Base de Datos
+- `npm run db:migrate` - Ejecuta migraciones pendientes (desarrollo)
+- `npm run db:migrate:deploy` - Aplica migraciones (producción)
+- `npm run db:reset` - Resetea la base de datos y ejecuta seed
+- `npm run db:seed` - Ejecuta el seed script
+- `npm run prisma:generate` - Genera el cliente de Prisma
+- `npm run prisma:studio` - Abre Prisma Studio
+- `npm run demo:setup` - Setup completo del demo (reset + dataset)
+
+### Desarrollo
+- `npm run lint` - Ejecuta el linter
+- `npm run format` - Formatea el código con Prettier
+
 ## Próximos Pasos
 
 - [x] Implementar migraciones de Prisma
@@ -832,9 +960,10 @@ Respuesta:
 - [x] Implementar dominio de inversiones v1
 - [x] Implementar reporting v1
 - [x] Implementar assistant AI con OpenAI
+- [x] Preparar demo reproducible
 - [ ] Agregar tests unitarios
 - [ ] Implementar refresh tokens
-- [ ] Agregar rate limiting
+- [ ] Agregar rate limiting global
 - [ ] Implementar métricas y monitoring
 
 ## Licencia
