@@ -1,4 +1,4 @@
-import { Injectable, ForbiddenException, NotFoundException, Inject, Optional } from '@nestjs/common';
+import { Injectable, ForbiddenException, NotFoundException, BadRequestException, ConflictException, Inject, Optional } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateValuationDto } from './dto/create-valuation.dto';
 import { UpdateValuationDto } from './dto/update-valuation.dto';
@@ -23,28 +23,47 @@ export class ValuationsService {
       throw new ForbiddenException('Asset not found or belongs to another tenant');
     }
 
-    const valuation = await this.prisma.valuation.create({
-      data: {
-        ...createValuationDto,
-        date: new Date(createValuationDto.date),
-        value: createValuationDto.value,
-        tenantId: context.tenantId!,
-      },
-      include: { asset: true },
-    });
-
-    // Record audit log
-    if (this.auditService) {
-      await this.auditService.recordFromContext(
-        context,
-        AuditAction.CREATE,
-        'Valuation',
-        valuation.id,
-        { assetId: valuation.assetId, value: valuation.value.toString(), currency: valuation.currency },
+    // Validate currency matches asset currency
+    if (createValuationDto.currency !== asset.currency) {
+      throw new BadRequestException(
+        `Valuation currency (${createValuationDto.currency}) must match asset currency (${asset.currency})`,
       );
     }
 
-    return valuation;
+    const valuationDate = new Date(createValuationDto.date);
+
+    try {
+      const valuation = await this.prisma.valuation.create({
+        data: {
+          ...createValuationDto,
+          date: valuationDate,
+          value: createValuationDto.value,
+          tenantId: context.tenantId!,
+        },
+        include: { asset: true },
+      });
+
+      // Record audit log
+      if (this.auditService) {
+        await this.auditService.recordFromContext(
+          context,
+          AuditAction.CREATE,
+          'Valuation',
+          valuation.id,
+          { assetId: valuation.assetId, value: valuation.value.toString(), currency: valuation.currency },
+        );
+      }
+
+      return valuation;
+    } catch (error: any) {
+      // Handle unique constraint violation
+      if (error.code === 'P2002' && error.meta?.target?.includes('tenantId_assetId_date')) {
+        throw new ConflictException(
+          'A valuation already exists for this asset on the specified date',
+        );
+      }
+      throw error;
+    }
   }
 
   async findAll(context: TenantContext, assetId?: string) {
@@ -84,15 +103,21 @@ export class ValuationsService {
   async update(id: string, updateValuationDto: UpdateValuationDto, context: TenantContext) {
     const valuation = await this.findOne(id, context);
 
-    // Verify asset if changed
-    if (updateValuationDto.assetId && updateValuationDto.assetId !== valuation.assetId) {
-      const asset = await this.prisma.asset.findUnique({
-        where: { id: updateValuationDto.assetId },
-      });
+    // Get asset (either from update or existing)
+    const assetId = updateValuationDto.assetId || valuation.assetId;
+    const asset = await this.prisma.asset.findUnique({
+      where: { id: assetId },
+    });
 
-      if (!asset || asset.tenantId !== context.tenantId) {
-        throw new ForbiddenException('Asset not found or belongs to another tenant');
-      }
+    if (!asset || asset.tenantId !== context.tenantId) {
+      throw new ForbiddenException('Asset not found or belongs to another tenant');
+    }
+
+    // Validate currency matches asset currency if currency is being updated
+    if (updateValuationDto.currency && updateValuationDto.currency !== asset.currency) {
+      throw new BadRequestException(
+        `Valuation currency (${updateValuationDto.currency}) must match asset currency (${asset.currency})`,
+      );
     }
 
     const data: any = { ...updateValuationDto };
@@ -100,24 +125,34 @@ export class ValuationsService {
       data.date = new Date(updateValuationDto.date);
     }
 
-    const updated = await this.prisma.valuation.update({
-      where: { id },
-      data,
-      include: { asset: true },
-    });
+    try {
+      const updated = await this.prisma.valuation.update({
+        where: { id },
+        data,
+        include: { asset: true },
+      });
 
-    // Record audit log
-    if (this.auditService) {
-      await this.auditService.recordFromContext(
-        context,
-        AuditAction.UPDATE,
-        'Valuation',
-        updated.id,
-        { assetId: updated.assetId, value: updated.value.toString() },
-      );
+      // Record audit log
+      if (this.auditService) {
+        await this.auditService.recordFromContext(
+          context,
+          AuditAction.UPDATE,
+          'Valuation',
+          updated.id,
+          { assetId: updated.assetId, value: updated.value.toString() },
+        );
+      }
+
+      return updated;
+    } catch (error: any) {
+      // Handle unique constraint violation
+      if (error.code === 'P2002' && error.meta?.target?.includes('tenantId_assetId_date')) {
+        throw new ConflictException(
+          'A valuation already exists for this asset on the specified date',
+        );
+      }
+      throw error;
     }
-
-    return updated;
   }
 
   async remove(id: string, context: TenantContext) {

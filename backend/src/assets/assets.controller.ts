@@ -33,6 +33,7 @@ export class AssetsController {
         currency: 'USD',
         legalEntityId: null,
         metadata: { ticker: 'AAPL', exchange: 'NASDAQ' },
+        latestValuation: null,
         createdAt: '2024-01-01T00:00:00.000Z',
         updatedAt: '2024-01-01T00:00:00.000Z',
       },
@@ -53,7 +54,22 @@ export class AssetsController {
   @ApiQuery({ name: 'legalEntityId', required: false, description: 'Filter by legal entity ID' })
   @ApiResponse({
     status: 200,
-    description: 'List of assets',
+    description: 'List of assets with latestValuation',
+    schema: {
+      example: [
+        {
+          id: '123e4567-e89b-12d3-a456-426614174000',
+          name: 'Apple Inc. Stock',
+          type: 'EQUITY',
+          currency: 'USD',
+          latestValuation: {
+            date: '2024-01-01T00:00:00.000Z',
+            value: '150000.50',
+            currency: 'USD',
+          },
+        },
+      ],
+    },
   })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   findAll(
@@ -68,7 +84,20 @@ export class AssetsController {
   @ApiParam({ name: 'id', description: 'Asset ID' })
   @ApiResponse({
     status: 200,
-    description: 'Asset found',
+    description: 'Asset found with latestValuation',
+    schema: {
+      example: {
+        id: '123e4567-e89b-12d3-a456-426614174000',
+        name: 'Apple Inc. Stock',
+        type: 'EQUITY',
+        currency: 'USD',
+        latestValuation: {
+          date: '2024-01-01T00:00:00.000Z',
+          value: '150000.50',
+          currency: 'USD',
+        },
+      },
+    },
   })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden - Cannot access asset from another tenant' })
@@ -109,6 +138,17 @@ export class AssetsController {
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden' })
   @ApiResponse({ status: 404, description: 'Asset not found' })
+  @ApiResponse({
+    status: 409,
+    description: 'Conflict - Asset has valuations and cannot be deleted',
+    schema: {
+      example: {
+        statusCode: 409,
+        message: 'Cannot delete asset: it has 3 valuation(s). Please delete all valuations first.',
+        error: 'Conflict',
+      },
+    },
+  })
   remove(
     @Param('id') id: string,
     @TenantContextDecorator() context: TenantContext,

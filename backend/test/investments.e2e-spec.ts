@@ -249,6 +249,238 @@ describe('Investments Domain (e2e)', () => {
     });
   });
 
+  describe('Valuation Rules', () => {
+    it('should NOT allow duplicate valuation for same asset and date (409)', async () => {
+      const asset = await request(app.getHttpServer())
+        .post('/assets')
+        .set('Authorization', `Bearer ${adminAToken}`)
+        .send({
+          name: 'Test Asset for Duplicate',
+          type: 'EQUITY',
+          currency: 'USD',
+        })
+        .expect(201);
+
+      const date = '2024-01-15T00:00:00.000Z';
+
+      // Create first valuation
+      await request(app.getHttpServer())
+        .post('/valuations')
+        .set('Authorization', `Bearer ${adminAToken}`)
+        .send({
+          assetId: asset.body.id,
+          date,
+          value: 100000,
+          currency: 'USD',
+          source: 'MANUAL',
+        })
+        .expect(201);
+
+      // Try to create duplicate
+      await request(app.getHttpServer())
+        .post('/valuations')
+        .set('Authorization', `Bearer ${adminAToken}`)
+        .send({
+          assetId: asset.body.id,
+          date,
+          value: 200000,
+          currency: 'USD',
+          source: 'MANUAL',
+        })
+        .expect(409);
+    });
+
+    it('should NOT allow valuation with currency different from asset currency (400)', async () => {
+      const asset = await request(app.getHttpServer())
+        .post('/assets')
+        .set('Authorization', `Bearer ${adminAToken}`)
+        .send({
+          name: 'USD Asset',
+          type: 'EQUITY',
+          currency: 'USD',
+        })
+        .expect(201);
+
+      await request(app.getHttpServer())
+        .post('/valuations')
+        .set('Authorization', `Bearer ${adminAToken}`)
+        .send({
+          assetId: asset.body.id,
+          date: '2024-01-16T00:00:00.000Z',
+          value: 100000,
+          currency: 'EUR', // Different currency
+          source: 'MANUAL',
+        })
+        .expect(400);
+    });
+
+    it('should NOT allow updating valuation with currency different from asset currency (400)', async () => {
+      const asset = await request(app.getHttpServer())
+        .post('/assets')
+        .set('Authorization', `Bearer ${adminAToken}`)
+        .send({
+          name: 'USD Asset 2',
+          type: 'EQUITY',
+          currency: 'USD',
+        })
+        .expect(201);
+
+      const valuation = await request(app.getHttpServer())
+        .post('/valuations')
+        .set('Authorization', `Bearer ${adminAToken}`)
+        .send({
+          assetId: asset.body.id,
+          date: '2024-01-17T00:00:00.000Z',
+          value: 100000,
+          currency: 'USD',
+          source: 'MANUAL',
+        })
+        .expect(201);
+
+      await request(app.getHttpServer())
+        .patch(`/valuations/${valuation.body.id}`)
+        .set('Authorization', `Bearer ${adminAToken}`)
+        .send({
+          currency: 'EUR', // Different currency
+        })
+        .expect(400);
+    });
+  });
+
+  describe('Asset Deletion Rules', () => {
+    it('should NOT allow deleting asset with valuations (409)', async () => {
+      const asset = await request(app.getHttpServer())
+        .post('/assets')
+        .set('Authorization', `Bearer ${adminAToken}`)
+        .send({
+          name: 'Asset with Valuation',
+          type: 'EQUITY',
+          currency: 'USD',
+        })
+        .expect(201);
+
+      // Create valuation
+      await request(app.getHttpServer())
+        .post('/valuations')
+        .set('Authorization', `Bearer ${adminAToken}`)
+        .send({
+          assetId: asset.body.id,
+          date: '2024-01-18T00:00:00.000Z',
+          value: 100000,
+          currency: 'USD',
+          source: 'MANUAL',
+        })
+        .expect(201);
+
+      // Try to delete asset
+      const response = await request(app.getHttpServer())
+        .delete(`/assets/${asset.body.id}`)
+        .set('Authorization', `Bearer ${adminAToken}`)
+        .expect(409);
+
+      expect(response.body.message).toContain('Cannot delete asset: it has');
+      expect(response.body.message).toContain('valuation(s)');
+    });
+
+    it('should allow deleting asset without valuations', async () => {
+      const asset = await request(app.getHttpServer())
+        .post('/assets')
+        .set('Authorization', `Bearer ${adminAToken}`)
+        .send({
+          name: 'Asset without Valuation',
+          type: 'EQUITY',
+          currency: 'USD',
+        })
+        .expect(201);
+
+      await request(app.getHttpServer())
+        .delete(`/assets/${asset.body.id}`)
+        .set('Authorization', `Bearer ${adminAToken}`)
+        .expect(200);
+    });
+  });
+
+  describe('Latest Valuation in Asset Response', () => {
+    it('should include latestValuation in GET asset by ID', async () => {
+      const asset = await request(app.getHttpServer())
+        .post('/assets')
+        .set('Authorization', `Bearer ${adminAToken}`)
+        .send({
+          name: 'Asset with Latest Valuation',
+          type: 'EQUITY',
+          currency: 'USD',
+        })
+        .expect(201);
+
+      // Create two valuations
+      await request(app.getHttpServer())
+        .post('/valuations')
+        .set('Authorization', `Bearer ${adminAToken}`)
+        .send({
+          assetId: asset.body.id,
+          date: '2024-01-19T00:00:00.000Z',
+          value: 100000,
+          currency: 'USD',
+          source: 'MANUAL',
+        })
+        .expect(201);
+
+      await request(app.getHttpServer())
+        .post('/valuations')
+        .set('Authorization', `Bearer ${adminAToken}`)
+        .send({
+          assetId: asset.body.id,
+          date: '2024-01-20T00:00:00.000Z',
+          value: 150000,
+          currency: 'USD',
+          source: 'MANUAL',
+        })
+        .expect(201);
+
+      // Get asset
+      const response = await request(app.getHttpServer())
+        .get(`/assets/${asset.body.id}`)
+        .set('Authorization', `Bearer ${adminAToken}`)
+        .expect(200);
+
+      expect(response.body).toHaveProperty('latestValuation');
+      expect(response.body.latestValuation).not.toBeNull();
+      expect(response.body.latestValuation.date).toBe('2024-01-20T00:00:00.000Z');
+      expect(response.body.latestValuation.value).toBe('150000');
+    });
+
+    it('should include latestValuation in GET all assets', async () => {
+      const response = await request(app.getHttpServer())
+        .get('/assets')
+        .set('Authorization', `Bearer ${adminAToken}`)
+        .expect(200);
+
+      expect(Array.isArray(response.body)).toBe(true);
+      if (response.body.length > 0) {
+        expect(response.body[0]).toHaveProperty('latestValuation');
+      }
+    });
+
+    it('should return null latestValuation for asset without valuations', async () => {
+      const asset = await request(app.getHttpServer())
+        .post('/assets')
+        .set('Authorization', `Bearer ${adminAToken}`)
+        .send({
+          name: 'Asset without Valuations',
+          type: 'EQUITY',
+          currency: 'USD',
+        })
+        .expect(201);
+
+      const response = await request(app.getHttpServer())
+        .get(`/assets/${asset.body.id}`)
+        .set('Authorization', `Bearer ${adminAToken}`)
+        .expect(200);
+
+      expect(response.body.latestValuation).toBeNull();
+    });
+  });
+
   describe('Audit Logs for Investments', () => {
     it('should record CREATE audit log when creating legal entity', async () => {
       const legalEntity = await request(app.getHttpServer())

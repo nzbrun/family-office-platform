@@ -1,4 +1,4 @@
-import { Injectable, ForbiddenException, NotFoundException, Inject, Optional } from '@nestjs/common';
+import { Injectable, ForbiddenException, NotFoundException, ConflictException, Inject, Optional } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateAssetDto } from './dto/create-asset.dto';
 import { UpdateAssetDto } from './dto/update-asset.dto';
@@ -56,11 +56,31 @@ export class AssetsService {
       where.legalEntityId = legalEntityId;
     }
 
-    return this.prisma.asset.findMany({
+    const assets = await this.prisma.asset.findMany({
       where,
       include: { legalEntity: true },
       orderBy: { createdAt: 'desc' },
     });
+
+    // Add latestValuation to each asset
+    return Promise.all(
+      assets.map(async (asset) => {
+        const latestValuation = await this.prisma.valuation.findFirst({
+          where: { assetId: asset.id },
+          orderBy: { date: 'desc' },
+          select: {
+            date: true,
+            value: true,
+            currency: true,
+          },
+        });
+
+        return {
+          ...asset,
+          latestValuation: latestValuation || null,
+        };
+      }),
+    );
   }
 
   async findOne(id: string, context: TenantContext) {
@@ -78,7 +98,21 @@ export class AssetsService {
       throw new ForbiddenException('Cannot access asset from another tenant');
     }
 
-    return asset;
+    // Get latest valuation
+    const latestValuation = await this.prisma.valuation.findFirst({
+      where: { assetId: asset.id },
+      orderBy: { date: 'desc' },
+      select: {
+        date: true,
+        value: true,
+        currency: true,
+      },
+    });
+
+    return {
+      ...asset,
+      latestValuation: latestValuation || null,
+    };
   }
 
   async update(id: string, updateAssetDto: UpdateAssetDto, context: TenantContext) {
@@ -117,6 +151,17 @@ export class AssetsService {
 
   async remove(id: string, context: TenantContext) {
     const asset = await this.findOne(id, context);
+
+    // Check if asset has valuations
+    const valuationCount = await this.prisma.valuation.count({
+      where: { assetId: id },
+    });
+
+    if (valuationCount > 0) {
+      throw new ConflictException(
+        `Cannot delete asset: it has ${valuationCount} valuation(s). Please delete all valuations first.`,
+      );
+    }
 
     const deleted = await this.prisma.asset.delete({
       where: { id },

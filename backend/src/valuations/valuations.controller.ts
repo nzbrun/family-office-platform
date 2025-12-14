@@ -39,9 +39,30 @@ export class ValuationsController {
       },
     },
   })
-  @ApiResponse({ status: 400, description: 'Validation error' })
+  @ApiResponse({
+    status: 400,
+    description: 'Validation error or currency mismatch',
+    schema: {
+      example: {
+        statusCode: 400,
+        message: 'Valuation currency (EUR) must match asset currency (USD)',
+        error: 'Bad Request',
+      },
+    },
+  })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden - Asset not found or belongs to another tenant' })
+  @ApiResponse({
+    status: 409,
+    description: 'Conflict - Valuation already exists for this asset on the specified date',
+    schema: {
+      example: {
+        statusCode: 409,
+        message: 'A valuation already exists for this asset on the specified date',
+        error: 'Conflict',
+      },
+    },
+  })
   create(
     @Body() createValuationDto: CreateValuationDto,
     @TenantContextDecorator() context: TenantContext,
@@ -88,10 +109,24 @@ export class ValuationsController {
     status: 200,
     description: 'Valuation updated successfully',
   })
-  @ApiResponse({ status: 400, description: 'Validation error' })
+  @ApiResponse({
+    status: 400,
+    description: 'Validation error or currency mismatch',
+    schema: {
+      example: {
+        statusCode: 400,
+        message: 'Valuation currency (EUR) must match asset currency (USD)',
+        error: 'Bad Request',
+      },
+    },
+  })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden' })
   @ApiResponse({ status: 404, description: 'Valuation not found' })
+  @ApiResponse({
+    status: 409,
+    description: 'Conflict - Valuation already exists for this asset on the specified date',
+  })
   update(
     @Param('id') id: string,
     @Body() updateValuationDto: UpdateValuationDto,

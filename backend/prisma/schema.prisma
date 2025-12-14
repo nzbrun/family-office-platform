@@ -140,5 +140,6 @@ model Valuation {
   @@index([tenantId])
   @@index([assetId])
   @@index([date])
+  @@unique([tenantId, assetId, date])
   @@map("valuations")
 }
