@@ -59,7 +59,19 @@ export class ApiClient {
           message: response.statusText,
           statusCode: response.status,
         }));
-        throw new Error(errorData.message || 'Request failed');
+        const error = new Error(errorData.message || 'Request failed') as Error & {
+          statusCode?: number;
+          retryAfter?: number;
+          requestId?: string;
+        };
+        error.statusCode = response.status;
+        if (errorData.retryAfter) {
+          error.retryAfter = errorData.retryAfter;
+        }
+        if (errorData.requestId) {
+          error.requestId = errorData.requestId;
+        }
+        throw error;
       }
 
       return await response.json();
