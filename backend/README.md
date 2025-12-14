@@ -76,13 +76,22 @@ npm run build
 
 ## Scripts Disponibles
 
+### Aplicación
 - `npm run start` - Inicia la aplicación
 - `npm run start:dev` - Inicia en modo desarrollo con watch
 - `npm run start:debug` - Inicia en modo debug
 - `npm run start:prod` - Inicia en modo producción
 - `npm run build` - Compila el proyecto
+
+### Base de Datos
+- `npm run db:migrate` - Ejecuta migraciones pendientes (desarrollo)
+- `npm run db:migrate:deploy` - Aplica migraciones (producción)
+- `npm run db:reset` - Resetea la base de datos y ejecuta seed
+- `npm run db:seed` - Ejecuta el seed script
 - `npm run prisma:generate` - Genera el cliente de Prisma
 - `npm run prisma:studio` - Abre Prisma Studio
+
+### Desarrollo
 - `npm run lint` - Ejecuta el linter
 - `npm run format` - Formatea el código con Prettier
 
@@ -151,9 +160,108 @@ Incluye:
 
 ## Base de Datos
 
-El schema de Prisma está definido en `prisma/schema.prisma`. 
+### Configuración Inicial
 
-**Nota**: Las migraciones no están implementadas aún en esta fase del MVP. El schema está listo para cuando se requiera ejecutar las migraciones.
+1. **Instalar PostgreSQL** (si no está instalado):
+
+```bash
+# macOS (con Homebrew)
+brew install postgresql@14
+brew services start postgresql@14
+
+# Ubuntu/Debian
+sudo apt-get install postgresql postgresql-contrib
+sudo systemctl start postgresql
+
+# Docker (alternativa)
+docker run --name postgres-dev -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=mydb -p 5432:5432 -d postgres:14
+```
+
+2. **Crear la base de datos**:
+
+```bash
+# Conectarse a PostgreSQL
+psql -U postgres
+
+# Crear base de datos
+CREATE DATABASE mydb;
+
+# Salir
+\q
+```
+
+3. **Configurar variables de entorno**:
+
+Asegúrate de que tu archivo `.env` tenga la conexión correcta:
+
+```env
+DATABASE_URL="postgresql://postgres:postgres@localhost:5432/mydb?schema=public"
+```
+
+### Migraciones
+
+El schema de Prisma está definido en `prisma/schema.prisma`. Las migraciones están en `prisma/migrations/`.
+
+**Primera vez (setup inicial):**
+
+```bash
+# 1. Generar el cliente de Prisma
+npm run prisma:generate
+
+# 2. Ejecutar migraciones (crea las tablas)
+npm run db:migrate
+
+# 3. Ejecutar seed (crea datos de demo)
+npm run db:seed
+```
+
+**Desarrollo (después de cambios en el schema):**
+
+```bash
+# Crear y aplicar nueva migración
+npm run db:migrate
+```
+
+**Resetear base de datos (desarrollo):**
+
+```bash
+# ⚠️ Esto elimina todos los datos y vuelve a crear todo
+npm run db:reset
+```
+
+### Seed (Datos de Demo)
+
+El seed script crea datos de ejemplo para desarrollo local:
+
+**Tenant:**
+- Nombre: "Demo Family Office"
+- Slug: `demo-family-office`
+
+**Usuarios creados:**
+
+| Email | Rol | Password |
+|-------|-----|----------|
+| `superadmin@demo.com` | SUPER_ADMIN | `Demo123!` |
+| `admin@demo.com` | ADMIN | `Demo123!` |
+| `user@demo.com` | USER | `Demo123!` |
+
+**Ejecutar seed:**
+
+```bash
+npm run db:seed
+```
+
+**Nota de seguridad:** Las contraseñas del seed son solo para desarrollo/demo. **NUNCA** uses estas contraseñas en producción.
+
+### Prisma Studio
+
+Para visualizar y editar datos directamente:
+
+```bash
+npm run prisma:studio
+```
+
+Esto abre una interfaz web en `http://localhost:5555`
 
 ## Validación
 
@@ -237,7 +345,8 @@ Retorna `503 Service Unavailable` si la base de datos no está disponible.
 
 ## Próximos Pasos
 
-- [ ] Implementar migraciones de Prisma
+- [x] Implementar migraciones de Prisma
+- [x] Implementar seed para desarrollo
 - [ ] Agregar tests unitarios y e2e
 - [ ] Implementar refresh tokens
 - [ ] Agregar rate limiting
