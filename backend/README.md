@@ -230,6 +230,19 @@ curl -H "Authorization: Bearer <superadmin-token>" \
 - `GET /reporting/summary` - Resumen agregado con totals por currency, type y legal entity (todos los roles)
   - SUPER_ADMIN puede filtrar por `tenantId` (query param o X-Tenant-Id header)
 
+### Assistant (Requiere autenticación JWT)
+- `POST /assistant/query` - Consultar al asistente AI sobre datos del portfolio (todos los roles)
+  - Body: `{ message: string }`
+  - Response: `{ answer: string, actionsTaken: string[], citations: string[] }`
+  - El asistente puede usar tools internas (read-only):
+    - `reporting_summary`: Resumen del portfolio
+    - `reporting_assets`: Assets con filtros
+    - `asset_get`: Detalles de un asset
+    - `valuations_list`: Valuaciones de un asset
+    - `audit_logs`: Logs de auditoría (solo SUPER_ADMIN/ADMIN)
+  - Respeta RBAC y aislamiento multi-tenant
+  - Requiere `OPENAI_API_KEY` configurado (retorna 501 si no está)
+
 ## Base de Datos
 
 ### Configuración Inicial
@@ -716,6 +729,69 @@ Todas las llamadas a reporting se registran en AuditLog con:
 - `entity`: Reporting
 - `metadata`: Endpoint y filtros aplicados
 
+## Assistant AI
+
+El sistema incluye un **asistente AI** que permite consultar datos del portfolio usando lenguaje natural.
+
+### Configuración
+
+Requiere configurar la variable de entorno `OPENAI_API_KEY`:
+
+```env
+OPENAI_API_KEY=sk-...
+OPENAI_MODEL=gpt-4o-mini  # Opcional, default: gpt-4o-mini
+```
+
+Si la API key no está configurada, el endpoint retorna `501 Not Implemented`.
+
+### Funcionalidades
+
+El asistente puede:
+- Responder preguntas sobre el portfolio
+- Acceder a reporting, assets, valuations y audit logs (según rol)
+- Respetar RBAC y aislamiento multi-tenant
+- Usar herramientas internas (tools) para obtener datos
+
+### Tools Disponibles
+
+**Para todos los roles:**
+- `reporting_summary`: Obtener resumen del portfolio
+- `reporting_assets`: Listar assets con filtros
+- `asset_get`: Obtener detalles de un asset
+- `valuations_list`: Listar valuaciones de un asset
+
+**Solo SUPER_ADMIN y ADMIN:**
+- `audit_logs`: Consultar logs de auditoría
+
+### Ejemplo de Uso
+
+```bash
+# Consultar valor del portfolio
+curl -X POST http://localhost:3000/assistant/query \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "¿Cuánto vale el portfolio?"
+  }'
+```
+
+Respuesta:
+```json
+{
+  "answer": "El portfolio tiene un valor total de $500,000 USD...",
+  "actionsTaken": ["reporting_summary"],
+  "citations": ["Used 1 tool(s): reporting_summary"]
+}
+```
+
+### Seguridad
+
+- Todas las queries se registran en AuditLog
+- Respeta RBAC: USER no puede usar `audit_logs`
+- Respeta multi-tenancy: solo accede a datos del tenant del usuario
+- Límite de 3 tool calls por query
+- Límite de 50 items en respuestas
+
 ## Próximos Pasos
 
 - [x] Implementar migraciones de Prisma
@@ -725,6 +801,7 @@ Todas las llamadas a reporting se registran en AuditLog con:
 - [x] Implementar sistema de auditoría
 - [x] Implementar dominio de inversiones v1
 - [x] Implementar reporting v1
+- [x] Implementar assistant AI con OpenAI
 - [ ] Agregar tests unitarios
 - [ ] Implementar refresh tokens
 - [ ] Agregar rate limiting

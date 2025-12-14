@@ -1,5 +1,5 @@
 import { plainToInstance } from 'class-transformer';
-import { IsEnum, IsNotEmpty, IsNumber, IsString, validateSync } from 'class-validator';
+import { IsEnum, IsNotEmpty, IsNumber, IsString, IsOptional, validateSync } from 'class-validator';
 
 enum Environment {
   Development = 'development',
@@ -24,6 +24,14 @@ class EnvironmentVariables {
 
   @IsString()
   JWT_EXPIRES_IN: string;
+
+  @IsString()
+  @IsOptional()
+  OPENAI_API_KEY?: string;
+
+  @IsString()
+  @IsOptional()
+  OPENAI_MODEL?: string;
 }
 
 export function validate(config: Record<string, unknown>) {
