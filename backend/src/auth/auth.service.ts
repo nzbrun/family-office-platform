@@ -32,10 +32,11 @@ export class AuthService {
   async login(loginDto: LoginDto) {
     const user = await this.validateUser(loginDto.email, loginDto.password);
     
+    // SUPER_ADMIN can have null tenantId
     const payload = {
       email: user.email,
       sub: user.id,
-      tenantId: user.tenantId,
+      tenantId: user.role === 'SUPER_ADMIN' ? null : user.tenantId,
       role: user.role,
     };
 
@@ -53,7 +54,7 @@ export class AuthService {
   }
 
   async register(registerDto: RegisterDto) {
-    const user = await this.usersService.create(registerDto);
+    const user = await this.usersService.createInternal(registerDto);
     const { password: _, ...result } = user;
 
     const payload = {

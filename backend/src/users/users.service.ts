@@ -1,36 +1,90 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { TenantContext } from '../common/context/tenant.context';
 import * as bcrypt from 'bcrypt';
 
 @Injectable()
 export class UsersService {
   constructor(private prisma: PrismaService) {}
 
-  async create(createUserDto: CreateUserDto) {
+  async create(createUserDto: CreateUserDto, context: TenantContext) {
+    // ADMIN can only create users in their own tenant
+    if (context.role === 'ADMIN' && createUserDto.tenantId !== context.tenantId) {
+      throw new ForbiddenException('Cannot create users in another tenant');
+    }
+
+    // Use effectiveTenantId for SUPER_ADMIN, otherwise use tenantId from DTO
+    const tenantId = context.role === 'SUPER_ADMIN' 
+      ? (context.effectiveTenantId || createUserDto.tenantId)
+      : context.tenantId!;
+
     const hashedPassword = await bcrypt.hash(createUserDto.password, 10);
     
     return this.prisma.user.create({
       data: {
         ...createUserDto,
+        tenantId,
         password: hashedPassword,
       },
     });
   }
 
-  async findAll(tenantId?: string) {
+  async findAll(context: TenantContext, tenantIdFilter?: string) {
+    let effectiveTenantId: string | null = null;
+
+    if (context.role === 'SUPER_ADMIN') {
+      // SUPER_ADMIN can filter by tenantId (query param or header)
+      effectiveTenantId = tenantIdFilter || context.effectiveTenantId;
+    } else if (context.role === 'ADMIN') {
+      // ADMIN can only see users in their tenant
+      effectiveTenantId = context.tenantId!;
+    } else {
+      // USER cannot list users
+      return [];
+    }
+
     return this.prisma.user.findMany({
       where: {
-        ...(tenantId && { tenantId }),
+        ...(effectiveTenantId && { tenantId: effectiveTenantId }),
         isActive: true,
+      },
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        isActive: true,
+        tenantId: true,
+        role: true,
+        createdAt: true,
+        updatedAt: true,
       },
     });
   }
 
-  async findOne(id: string) {
-    return this.prisma.user.findUnique({
+  async findOne(id: string, context: TenantContext) {
+    const user = await this.prisma.user.findUnique({
       where: { id },
+      include: { tenant: true },
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    // ADMIN/USER can only access users in their tenant
+    if (context.role !== 'SUPER_ADMIN' && user.tenantId !== context.tenantId) {
+      throw new ForbiddenException('Cannot access user from another tenant');
+    }
+
+    return user;
+  }
+
+  async findMe(context: TenantContext) {
+    return this.prisma.user.findUnique({
+      where: { id: context.userId },
       include: { tenant: true },
     });
   }
@@ -42,7 +96,34 @@ export class UsersService {
     });
   }
 
-  async update(id: string, updateUserDto: UpdateUserDto) {
+  // Internal method for auth (no tenant context required)
+  async findOneInternal(id: string) {
+    return this.prisma.user.findUnique({
+      where: { id },
+      include: { tenant: true },
+    });
+  }
+
+  // Internal method for auth (no tenant context required)
+  async createInternal(createUserDto: CreateUserDto) {
+    const hashedPassword = await bcrypt.hash(createUserDto.password, 10);
+    
+    return this.prisma.user.create({
+      data: {
+        ...createUserDto,
+        password: hashedPassword,
+      },
+    });
+  }
+
+  async update(id: string, updateUserDto: UpdateUserDto, context: TenantContext) {
+    const user = await this.findOne(id, context);
+
+    // ADMIN cannot change tenantId
+    if (context.role === 'ADMIN' && updateUserDto.tenantId && updateUserDto.tenantId !== user.tenantId) {
+      throw new ForbiddenException('Cannot change user tenant');
+    }
+
     const data: any = { ...updateUserDto };
     
     if (updateUserDto.password) {
@@ -55,7 +136,10 @@ export class UsersService {
     });
   }
 
-  async remove(id: string) {
+  async remove(id: string, context: TenantContext) {
+    // Verify user exists and is accessible
+    await this.findOne(id, context);
+
     return this.prisma.user.update({
       where: { id },
       data: { isActive: false },

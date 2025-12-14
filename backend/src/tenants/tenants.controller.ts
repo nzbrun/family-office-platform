@@ -1,19 +1,27 @@
 import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam, ApiHeader } from '@nestjs/swagger';
 import { TenantsService } from './tenants.service';
 import { CreateTenantDto } from './dto/create-tenant.dto';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { TenantGuard } from '../common/guards/tenant.guard';
+import { TenantContextDecorator } from '../common/decorators/tenant-context.decorator';
+import type { TenantContext } from '../common/context/tenant.context';
+import { Roles } from '../common/decorators/roles.decorator';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Role } from '@prisma/client';
 
 @ApiTags('tenants')
 @ApiBearerAuth('JWT-auth')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, TenantGuard)
 @Controller('tenants')
 export class TenantsController {
   constructor(private readonly tenantsService: TenantsService) {}
 
   @Post()
-  @ApiOperation({ summary: 'Create a new tenant' })
+  @Roles(Role.SUPER_ADMIN)
+  @UseGuards(RolesGuard)
+  @ApiOperation({ summary: 'Create a new tenant (SUPER_ADMIN only)' })
   @ApiResponse({
     status: 201,
     description: 'Tenant created successfully',
@@ -30,13 +38,19 @@ export class TenantsController {
   })
   @ApiResponse({ status: 400, description: 'Validation error' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden - Only SUPER_ADMIN can create tenants' })
   @ApiResponse({ status: 409, description: 'Tenant slug already exists' })
-  create(@Body() createTenantDto: CreateTenantDto) {
-    return this.tenantsService.create(createTenantDto);
+  create(
+    @Body() createTenantDto: CreateTenantDto,
+    @TenantContextDecorator() context: TenantContext,
+  ) {
+    return this.tenantsService.create(createTenantDto, context);
   }
 
   @Get()
-  @ApiOperation({ summary: 'Get all tenants' })
+  @Roles(Role.SUPER_ADMIN)
+  @UseGuards(RolesGuard)
+  @ApiOperation({ summary: 'Get all tenants (SUPER_ADMIN only)' })
   @ApiResponse({
     status: 200,
     description: 'List of active tenants',
@@ -52,8 +66,9 @@ export class TenantsController {
     },
   })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  findAll() {
-    return this.tenantsService.findAll();
+  @ApiResponse({ status: 403, description: 'Forbidden - Only SUPER_ADMIN can list tenants' })
+  findAll(@TenantContextDecorator() context: TenantContext) {
+    return this.tenantsService.findAll(context);
   }
 
   @Get(':id')
@@ -74,13 +89,19 @@ export class TenantsController {
     },
   })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden - Cannot access tenant from another organization' })
   @ApiResponse({ status: 404, description: 'Tenant not found' })
-  findOne(@Param('id') id: string) {
-    return this.tenantsService.findOne(id);
+  findOne(
+    @Param('id') id: string,
+    @TenantContextDecorator() context: TenantContext,
+  ) {
+    return this.tenantsService.findOne(id, context);
   }
 
   @Patch(':id')
-  @ApiOperation({ summary: 'Update tenant' })
+  @Roles(Role.SUPER_ADMIN)
+  @UseGuards(RolesGuard)
+  @ApiOperation({ summary: 'Update tenant (SUPER_ADMIN only)' })
   @ApiParam({ name: 'id', description: 'Tenant ID', example: '123e4567-e89b-12d3-a456-426614174000' })
   @ApiResponse({
     status: 200,
@@ -88,21 +109,32 @@ export class TenantsController {
   })
   @ApiResponse({ status: 400, description: 'Validation error' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden - Only SUPER_ADMIN can update tenants' })
   @ApiResponse({ status: 404, description: 'Tenant not found' })
-  update(@Param('id') id: string, @Body() updateTenantDto: UpdateTenantDto) {
-    return this.tenantsService.update(id, updateTenantDto);
+  update(
+    @Param('id') id: string,
+    @Body() updateTenantDto: UpdateTenantDto,
+    @TenantContextDecorator() context: TenantContext,
+  ) {
+    return this.tenantsService.update(id, updateTenantDto, context);
   }
 
   @Delete(':id')
-  @ApiOperation({ summary: 'Delete tenant (soft delete)' })
+  @Roles(Role.SUPER_ADMIN)
+  @UseGuards(RolesGuard)
+  @ApiOperation({ summary: 'Delete tenant (soft delete, SUPER_ADMIN only)' })
   @ApiParam({ name: 'id', description: 'Tenant ID', example: '123e4567-e89b-12d3-a456-426614174000' })
   @ApiResponse({
     status: 200,
     description: 'Tenant deleted successfully',
   })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden - Only SUPER_ADMIN can delete tenants' })
   @ApiResponse({ status: 404, description: 'Tenant not found' })
-  remove(@Param('id') id: string) {
-    return this.tenantsService.remove(id);
+  remove(
+    @Param('id') id: string,
+    @TenantContextDecorator() context: TenantContext,
+  ) {
+    return this.tenantsService.remove(id, context);
   }
 }

@@ -135,6 +135,39 @@ Incluye:
 4. Ingresa: `Bearer <tu-access-token>`
 5. Ahora puedes probar los endpoints protegidos
 
+## Multi-Tenancy
+
+El sistema implementa **aislamiento real multi-tenant** con las siguientes características:
+
+### Aislamiento por Rol
+
+**SUPER_ADMIN:**
+- Puede acceder a todos los tenants
+- Puede usar header `X-Tenant-Id` para scoping de queries
+- Puede filtrar usuarios por `tenantId` (query param o header)
+- CRUD completo de tenants
+
+**ADMIN:**
+- Solo puede acceder a recursos de su propio tenant
+- CRUD de usuarios solo en su tenant
+- Solo puede ver su propio tenant (GET /tenants/:id)
+- No puede listar todos los tenants
+
+**USER:**
+- Solo puede acceder a su propio perfil (GET /users/me)
+- No puede listar usuarios
+- Solo puede ver su propio tenant (GET /tenants/:id)
+
+### Header X-Tenant-Id
+
+El header `X-Tenant-Id` permite a SUPER_ADMIN especificar el tenant para scoping de queries:
+
+```bash
+curl -H "Authorization: Bearer <superadmin-token>" \
+     -H "X-Tenant-Id: <tenant-id>" \
+     http://localhost:3000/users
+```
+
 ## Endpoints Principales
 
 ### Health Check
@@ -145,18 +178,19 @@ Incluye:
 - `POST /auth/register` - Registrar nuevo usuario
 
 ### Usuarios (Requiere autenticación JWT)
-- `GET /users` - Listar usuarios
-- `GET /users/:id` - Obtener usuario por ID
-- `POST /users` - Crear usuario
-- `PATCH /users/:id` - Actualizar usuario
-- `DELETE /users/:id` - Eliminar usuario (soft delete)
+- `GET /users` - Listar usuarios (ADMIN/SUPER_ADMIN)
+- `GET /users/me` - Obtener perfil del usuario actual (todos los roles)
+- `GET /users/:id` - Obtener usuario por ID (con aislamiento tenant)
+- `POST /users` - Crear usuario (ADMIN/SUPER_ADMIN, solo en su tenant)
+- `PATCH /users/:id` - Actualizar usuario (ADMIN/SUPER_ADMIN)
+- `DELETE /users/:id` - Eliminar usuario (soft delete, ADMIN/SUPER_ADMIN)
 
 ### Tenants (Requiere autenticación JWT)
-- `GET /tenants` - Listar tenants
-- `GET /tenants/:id` - Obtener tenant por ID
-- `POST /tenants` - Crear tenant
-- `PATCH /tenants/:id` - Actualizar tenant
-- `DELETE /tenants/:id` - Eliminar tenant (soft delete)
+- `GET /tenants` - Listar tenants (SUPER_ADMIN only)
+- `GET /tenants/:id` - Obtener tenant por ID (con aislamiento)
+- `POST /tenants` - Crear tenant (SUPER_ADMIN only)
+- `PATCH /tenants/:id` - Actualizar tenant (SUPER_ADMIN only)
+- `DELETE /tenants/:id` - Eliminar tenant (soft delete, SUPER_ADMIN only)
 
 ## Base de Datos
 
@@ -346,11 +380,148 @@ El endpoint `/health` proporciona información sobre el estado de la aplicación
 
 Retorna `503 Service Unavailable` si la base de datos no está disponible.
 
+## Ejemplos de Uso (cURL)
+
+### 1. Login como Admin del Tenant A
+
+```bash
+curl -X POST http://localhost:3000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "admin@demo.com",
+    "password": "Demo123!"
+  }'
+```
+
+Respuesta:
+```json
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "user": {
+    "id": "...",
+    "email": "admin@demo.com",
+    "role": "ADMIN",
+    "tenantId": "..."
+  }
+}
+```
+
+### 2. Listar usuarios (solo del tenant del admin)
+
+```bash
+TOKEN="<token-del-paso-1>"
+
+curl -X GET http://localhost:3000/users \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### 3. Intentar acceder a usuario de otro tenant (403)
+
+```bash
+# Obtener ID de usuario del tenant B (desde seed o DB)
+USER_B_ID="<id-del-usuario-tenant-b>"
+
+curl -X GET http://localhost:3000/users/$USER_B_ID \
+  -H "Authorization: Bearer $TOKEN"
+# Retorna 403 Forbidden
+```
+
+### 4. SUPER_ADMIN con X-Tenant-Id header
+
+```bash
+# Login como superadmin
+SUPER_TOKEN=$(curl -s -X POST http://localhost:3000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email": "superadmin@demo.com", "password": "Demo123!"}' \
+  | jq -r '.access_token')
+
+# Listar usuarios del tenant A
+TENANT_A_ID="<tenant-a-id>"
+curl -X GET http://localhost:3000/users \
+  -H "Authorization: Bearer $SUPER_TOKEN" \
+  -H "X-Tenant-Id: $TENANT_A_ID"
+
+# Listar usuarios del tenant B
+TENANT_B_ID="<tenant-b-id>"
+curl -X GET http://localhost:3000/users \
+  -H "Authorization: Bearer $SUPER_TOKEN" \
+  -H "X-Tenant-Id: $TENANT_B_ID"
+```
+
+### 5. USER accediendo a su perfil
+
+```bash
+# Login como user
+USER_TOKEN=$(curl -s -X POST http://localhost:3000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email": "user@demo.com", "password": "Demo123!"}' \
+  | jq -r '.access_token')
+
+# Acceder a /users/me
+curl -X GET http://localhost:3000/users/me \
+  -H "Authorization: Bearer $USER_TOKEN"
+
+# Intentar listar usuarios (403)
+curl -X GET http://localhost:3000/users \
+  -H "Authorization: Bearer $USER_TOKEN"
+# Retorna 403 Forbidden
+```
+
+## Tests E2E
+
+El proyecto incluye tests end-to-end para validar el aislamiento multi-tenant.
+
+### Ejecutar Tests E2E
+
+```bash
+# Asegúrate de tener la base de datos corriendo y el seed ejecutado
+npm run db:seed
+
+# Ejecutar todos los tests e2e
+npm run test:e2e
+
+# Ejecutar solo tests de multi-tenancy
+npm run test:e2e -- multi-tenant
+```
+
+### Tests Incluidos
+
+Los tests e2e validan:
+
+1. **Autenticación:**
+   - Login de admin tenant A
+   - Login de admin tenant B
+   - Login de superadmin
+
+2. **Aislamiento de Usuarios:**
+   - Admin A solo ve usuarios de tenant A
+   - Admin A NO puede acceder a usuarios de tenant B (403)
+   - Admin B solo ve usuarios de tenant B
+   - Admin A NO puede crear usuarios en tenant B (403)
+
+3. **Aislamiento de Tenants:**
+   - Admin A puede acceder a su tenant
+   - Admin A NO puede acceder a tenant B (403)
+   - Admin A NO puede listar tenants (403)
+
+4. **SUPER_ADMIN Cross-Tenant:**
+   - SUPER_ADMIN puede listar todos los tenants
+   - SUPER_ADMIN puede acceder a cualquier tenant
+   - SUPER_ADMIN puede filtrar usuarios por X-Tenant-Id header
+   - SUPER_ADMIN puede filtrar usuarios por query param tenantId
+   - SUPER_ADMIN puede acceder a usuarios de cualquier tenant
+
+5. **Restricciones de USER:**
+   - USER puede acceder a /users/me
+   - USER NO puede listar usuarios (403)
+
 ## Próximos Pasos
 
 - [x] Implementar migraciones de Prisma
 - [x] Implementar seed para desarrollo
-- [ ] Agregar tests unitarios y e2e
+- [x] Implementar multi-tenancy con aislamiento real
+- [x] Agregar tests e2e para multi-tenancy
+- [ ] Agregar tests unitarios
 - [ ] Implementar refresh tokens
 - [ ] Agregar rate limiting
 - [ ] Implementar métricas y monitoring

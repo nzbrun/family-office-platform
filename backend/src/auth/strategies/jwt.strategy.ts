@@ -7,7 +7,7 @@ import { UsersService } from '../../users/users.service';
 export interface JwtPayload {
   sub: string;
   email: string;
-  tenantId: string;
+  tenantId: string | null;
   role: string;
 }
 
@@ -25,7 +25,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   }
 
   async validate(payload: JwtPayload) {
-    const user = await this.usersService.findOne(payload.sub);
+    const user = await this.usersService.findOneInternal(payload.sub);
     
     if (!user || !user.isActive) {
       throw new UnauthorizedException();
