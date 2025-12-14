@@ -231,19 +231,22 @@ npm run db:reset
 
 ### Seed (Datos de Demo)
 
-El seed script crea datos de ejemplo para desarrollo local:
+El seed script crea datos de ejemplo para desarrollo local con soporte multi-tenant:
 
-**Tenant:**
-- Nombre: "Demo Family Office"
+**Tenant A: "Demo Family Office"**
 - Slug: `demo-family-office`
+
+**Tenant B: "Demo Family Office B"**
+- Slug: `demo-family-office-b`
 
 **Usuarios creados:**
 
-| Email | Rol | Password |
-|-------|-----|----------|
-| `superadmin@demo.com` | SUPER_ADMIN | `Demo123!` |
-| `admin@demo.com` | ADMIN | `Demo123!` |
-| `user@demo.com` | USER | `Demo123!` |
+| Email | Rol | Tenant | Password |
+|-------|-----|--------|----------|
+| `superadmin@demo.com` | SUPER_ADMIN | A | `Demo123!` |
+| `admin@demo.com` | ADMIN | A | `Demo123!` |
+| `user@demo.com` | USER | A | `Demo123!` |
+| `admin.b@demo.com` | ADMIN | B | `Demo123!` |
 
 **Ejecutar seed:**
 

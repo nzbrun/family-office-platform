@@ -7,10 +7,12 @@ const prisma = new PrismaClient();
  * Seed script for local/development environment
  * 
  * Creates:
- * - Demo tenant: "Demo Family Office"
- * - SUPER_ADMIN user: superadmin@demo.com
- * - ADMIN user: admin@demo.com
- * - USER user: user@demo.com
+ * - Tenant A: "Demo Family Office" (slug: demo-family-office)
+ *   - SUPER_ADMIN user: superadmin@demo.com
+ *   - ADMIN user: admin@demo.com
+ *   - USER user: user@demo.com
+ * - Tenant B: "Demo Family Office B" (slug: demo-family-office-b)
+ *   - ADMIN user: admin.b@demo.com
  * 
  * Default passwords (for demo purposes):
  * - All users: Demo123!
@@ -24,8 +26,8 @@ async function main() {
   // Hash password once for all users
   const hashedPassword = await bcrypt.hash(DEFAULT_PASSWORD, 10);
 
-  // Create demo tenant
-  const tenant = await prisma.tenant.upsert({
+  // Create demo tenant A
+  const tenantA = await prisma.tenant.upsert({
     where: { slug: 'demo-family-office' },
     update: {},
     create: {
@@ -35,7 +37,20 @@ async function main() {
     },
   });
 
-  console.log('✅ Tenant created:', tenant.name);
+  console.log('✅ Tenant A created:', tenantA.name);
+
+  // Create demo tenant B
+  const tenantB = await prisma.tenant.upsert({
+    where: { slug: 'demo-family-office-b' },
+    update: {},
+    create: {
+      name: 'Demo Family Office B',
+      slug: 'demo-family-office-b',
+      isActive: true,
+    },
+  });
+
+  console.log('✅ Tenant B created:', tenantB.name);
 
   // Create SUPER_ADMIN user
   const superAdmin = await prisma.user.upsert({
@@ -47,7 +62,7 @@ async function main() {
       firstName: 'Super',
       lastName: 'Admin',
       role: Role.SUPER_ADMIN,
-      tenantId: tenant.id,
+      tenantId: tenantA.id,
       isActive: true,
     },
   });
@@ -64,7 +79,7 @@ async function main() {
       firstName: 'Admin',
       lastName: 'User',
       role: Role.ADMIN,
-      tenantId: tenant.id,
+      tenantId: tenantA.id,
       isActive: true,
     },
   });
@@ -81,20 +96,38 @@ async function main() {
       firstName: 'Regular',
       lastName: 'User',
       role: Role.USER,
-      tenantId: tenant.id,
+      tenantId: tenantA.id,
       isActive: true,
     },
   });
 
   console.log('✅ USER created:', user.email);
 
+  // Create ADMIN user for tenant B
+  const adminB = await prisma.user.upsert({
+    where: { email: 'admin.b@demo.com' },
+    update: {},
+    create: {
+      email: 'admin.b@demo.com',
+      password: hashedPassword,
+      firstName: 'Admin',
+      lastName: 'Tenant B',
+      role: Role.ADMIN,
+      tenantId: tenantB.id,
+      isActive: true,
+    },
+  });
+
+  console.log('✅ ADMIN (Tenant B) created:', adminB.email);
+
   console.log('\n📋 Seed Summary:');
   console.log('================');
-  console.log(`Tenant: ${tenant.name} (${tenant.slug})`);
-  console.log(`\nUsers created:`);
+  console.log(`\nTenant A: ${tenantA.name} (${tenantA.slug})`);
   console.log(`  - ${superAdmin.email} (${superAdmin.role})`);
   console.log(`  - ${admin.email} (${admin.role})`);
   console.log(`  - ${user.email} (${user.role})`);
+  console.log(`\nTenant B: ${tenantB.name} (${tenantB.slug})`);
+  console.log(`  - ${adminB.email} (${adminB.role})`);
   console.log(`\n🔑 Default password for all users: ${DEFAULT_PASSWORD}`);
   console.log('\n✨ Seed completed successfully!');
 }
