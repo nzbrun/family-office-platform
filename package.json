@@ -1,0 +1,28 @@
+{
+  "name": "portfolio-manager-demo",
+  "version": "1.0.0",
+  "description": "Portfolio Manager - One command demo setup",
+  "private": true,
+  "scripts": {
+    "demo:db:up": "docker compose up -d",
+    "demo:db:down": "docker compose down",
+    "demo:db:logs": "docker compose logs -f postgres",
+    "demo:backend": "cd backend && cross-env NODE_ENV=development dotenv -e .env.demo -- npm run start:dev",
+    "demo:frontend": "cd frontend && npm run dev",
+    "demo:setup": "cd backend && cross-env NODE_ENV=development dotenv -e .env.demo -- npm run demo:setup",
+    "demo:wait-db": "wait-on tcp:localhost:5432 --timeout 30000",
+    "demo:wait-backend": "wait-on http://localhost:3000/health --timeout 60000",
+    "demo:all": "npm run demo:db:up && npm run demo:wait-db && concurrently -n \"backend,setup\" -c \"blue,green\" \"npm run demo:backend\" \"npm run demo:wait-backend && npm run demo:setup\" && echo Setup complete! Starting frontend... && npm run demo:frontend",
+    "demo:clean": "npm run demo:db:down"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "cross-env": "^7.0.3",
+    "dotenv-cli": "^7.4.4",
+    "wait-on": "^8.0.5"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  }
+}
