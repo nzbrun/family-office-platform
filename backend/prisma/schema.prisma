@@ -20,6 +20,9 @@ model Tenant {
   updatedAt DateTime @updatedAt
 
   users User[]
+  legalEntities LegalEntity[]
+  assets Asset[]
+  valuations Valuation[]
 
   @@map("tenants")
 }
@@ -76,4 +79,66 @@ model AuditLog {
   @@index([entity])
   @@index([createdAt])
   @@map("audit_logs")
+}
+
+// LegalEntity model for investment domain
+model LegalEntity {
+  id        String   @id @default(uuid())
+  tenantId  String
+  name      String
+  type      String
+  country   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  assets Asset[]
+
+  @@index([tenantId])
+  @@index([name])
+  @@map("legal_entities")
+}
+
+// Asset model for investment domain
+model Asset {
+  id            String       @id @default(uuid())
+  tenantId      String
+  name          String
+  type          String
+  currency      String
+  legalEntityId String?
+  metadata      Json?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  tenant       Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  legalEntity  LegalEntity? @relation(fields: [legalEntityId], references: [id], onDelete: SetNull)
+  valuations   Valuation[]
+
+  @@index([tenantId])
+  @@index([legalEntityId])
+  @@index([name])
+  @@map("assets")
+}
+
+// Valuation model for investment domain
+model Valuation {
+  id        String   @id @default(uuid())
+  tenantId  String
+  assetId   String
+  date      DateTime
+  value     Decimal   @db.Decimal(20, 2)
+  currency  String
+  source    String
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  asset  Asset  @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([assetId])
+  @@index([date])
+  @@map("valuations")
 }

@@ -199,6 +199,29 @@ curl -H "Authorization: Bearer <superadmin-token>" \
   - SUPER_ADMIN puede ver todos los logs o filtrar por tenant
   - ADMIN solo ve logs de su tenant
 
+### Legal Entities (Requiere autenticación JWT)
+- `GET /legal-entities` - Listar entidades legales (SUPER_ADMIN/ADMIN)
+- `GET /legal-entities/:id` - Obtener entidad legal por ID
+- `POST /legal-entities` - Crear entidad legal
+- `PATCH /legal-entities/:id` - Actualizar entidad legal
+- `DELETE /legal-entities/:id` - Eliminar entidad legal
+
+### Assets (Requiere autenticación JWT)
+- `GET /assets` - Listar activos (SUPER_ADMIN/ADMIN)
+  - Filtro opcional: `legalEntityId`
+- `GET /assets/:id` - Obtener activo por ID (incluye últimas 10 valuaciones)
+- `POST /assets` - Crear activo
+- `PATCH /assets/:id` - Actualizar activo
+- `DELETE /assets/:id` - Eliminar activo
+
+### Valuations (Requiere autenticación JWT)
+- `GET /valuations` - Listar valuaciones (SUPER_ADMIN/ADMIN)
+  - Filtro opcional: `assetId`
+- `GET /valuations/:id` - Obtener valuación por ID
+- `POST /valuations` - Crear valuación
+- `PATCH /valuations/:id` - Actualizar valuación
+- `DELETE /valuations/:id` - Eliminar valuación
+
 ## Base de Datos
 
 ### Configuración Inicial
@@ -568,6 +591,75 @@ curl -X GET "http://localhost:3000/audit-logs?startDate=2024-01-01&endDate=2024-
   -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
 
+## Dominio de Inversiones
+
+El sistema incluye un dominio de inversiones v1 para gestión de activos manuales:
+
+### Modelos
+
+**LegalEntity (Entidades Legales):**
+- Representa entidades legales (LLC, Corporation, etc.)
+- Campos: `name`, `type`, `country`
+- Relación con Tenant (multi-tenant)
+
+**Asset (Activos):**
+- Representa activos de inversión
+- Campos: `name`, `type`, `currency`, `legalEntityId` (opcional), `metadata` (JSON)
+- Relación con LegalEntity (opcional)
+- Relación con Tenant (multi-tenant)
+
+**Valuation (Valuaciones):**
+- Representa valuaciones de activos en el tiempo
+- Campos: `date`, `value`, `currency`, `source`, `notes` (opcional)
+- Relación con Asset
+- Relación con Tenant (multi-tenant)
+
+### Ejemplo de Flujo
+
+```bash
+# 1. Crear entidad legal
+LEGAL_ENTITY=$(curl -s -X POST http://localhost:3000/legal-entities \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Acme Holdings LLC",
+    "type": "LLC",
+    "country": "US"
+  }' | jq -r '.id')
+
+# 2. Crear activo
+ASSET=$(curl -s -X POST http://localhost:3000/assets \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"name\": \"Apple Inc. Stock\",
+    \"type\": \"EQUITY\",
+    \"currency\": \"USD\",
+    \"legalEntityId\": \"$LEGAL_ENTITY\",
+    \"metadata\": {\"ticker\": \"AAPL\", \"exchange\": \"NASDAQ\"}
+  }" | jq -r '.id')
+
+# 3. Crear valuación
+curl -X POST http://localhost:3000/valuations \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"assetId\": \"$ASSET\",
+    \"date\": \"2024-01-01T00:00:00.000Z\",
+    \"value\": 150000.50,
+    \"currency\": \"USD\",
+    \"source\": \"MANUAL\",
+    \"notes\": \"Based on market price\"
+  }"
+```
+
+### Aislamiento Multi-Tenant
+
+- Todos los recursos (LegalEntity, Asset, Valuation) están aislados por tenant
+- ADMIN solo puede acceder a recursos de su tenant
+- SUPER_ADMIN puede acceder a todos los recursos
+- Todas las operaciones CRUD registran auditoría
+
 ## Próximos Pasos
 
 - [x] Implementar migraciones de Prisma
@@ -575,6 +667,7 @@ curl -X GET "http://localhost:3000/audit-logs?startDate=2024-01-01&endDate=2024-
 - [x] Implementar multi-tenancy con aislamiento real
 - [x] Agregar tests e2e para multi-tenancy
 - [x] Implementar sistema de auditoría
+- [x] Implementar dominio de inversiones v1
 - [ ] Agregar tests unitarios
 - [ ] Implementar refresh tokens
 - [ ] Agregar rate limiting

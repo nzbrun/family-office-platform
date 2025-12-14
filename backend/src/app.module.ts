@@ -8,6 +8,9 @@ import { UsersModule } from './users/users.module';
 import { TenantsModule } from './tenants/tenants.module';
 import { HealthModule } from './health/health.module';
 import { AuditModule } from './audit/audit.module';
+import { LegalEntitiesModule } from './legal-entities/legal-entities.module';
+import { AssetsModule } from './assets/assets.module';
+import { ValuationsModule } from './valuations/valuations.module';
 
 @Module({
   imports: [
@@ -18,6 +21,9 @@ import { AuditModule } from './audit/audit.module';
     TenantsModule,
     HealthModule,
     AuditModule,
+    LegalEntitiesModule,
+    AssetsModule,
+    ValuationsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
