@@ -48,3 +48,32 @@ enum Role {
   ADMIN
   USER
 }
+
+// Audit action enum
+enum AuditAction {
+  LOGIN
+  CREATE
+  UPDATE
+  DELETE
+}
+
+// AuditLog model for audit trail
+model AuditLog {
+  id          String      @id @default(uuid())
+  tenantId    String?
+  actorUserId String
+  actorRole   Role
+  action      AuditAction
+  entity      String
+  entityId    String?
+  metadata    Json?
+  requestId   String?
+  createdAt   DateTime    @default(now())
+
+  @@index([tenantId])
+  @@index([actorUserId])
+  @@index([action])
+  @@index([entity])
+  @@index([createdAt])
+  @@map("audit_logs")
+}

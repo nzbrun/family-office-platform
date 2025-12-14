@@ -1,13 +1,18 @@
-import { Injectable, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { Injectable, ForbiddenException, NotFoundException, Inject, Optional } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { TenantContext } from '../common/context/tenant.context';
+import { AuditService } from '../audit/audit.service';
+import { AuditAction } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 
 @Injectable()
 export class UsersService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    @Optional() @Inject(AuditService) private auditService?: AuditService,
+  ) {}
 
   async create(createUserDto: CreateUserDto, context: TenantContext) {
     // ADMIN can only create users in their own tenant
@@ -22,13 +27,26 @@ export class UsersService {
 
     const hashedPassword = await bcrypt.hash(createUserDto.password, 10);
     
-    return this.prisma.user.create({
+    const user = await this.prisma.user.create({
       data: {
         ...createUserDto,
         tenantId,
         password: hashedPassword,
       },
     });
+
+    // Record audit log
+    if (this.auditService) {
+      await this.auditService.recordFromContext(
+        context,
+        AuditAction.CREATE,
+        'User',
+        user.id,
+        { email: user.email, role: user.role },
+      );
+    }
+
+    return user;
   }
 
   async findAll(context: TenantContext, tenantIdFilter?: string) {
@@ -130,19 +148,56 @@ export class UsersService {
       data.password = await bcrypt.hash(updateUserDto.password, 10);
     }
 
-    return this.prisma.user.update({
+    const updatedUser = await this.prisma.user.update({
       where: { id },
       data,
     });
+
+    // Record audit log
+    if (this.auditService) {
+      const changes: Record<string, any> = {};
+      if (updateUserDto.email && updateUserDto.email !== user.email) {
+        changes.email = { from: user.email, to: updateUserDto.email };
+      }
+      if (updateUserDto.firstName && updateUserDto.firstName !== user.firstName) {
+        changes.firstName = { from: user.firstName, to: updateUserDto.firstName };
+      }
+      if (updateUserDto.role && updateUserDto.role !== user.role) {
+        changes.role = { from: user.role, to: updateUserDto.role };
+      }
+
+      await this.auditService.recordFromContext(
+        context,
+        AuditAction.UPDATE,
+        'User',
+        updatedUser.id,
+        { email: updatedUser.email, changes: Object.keys(changes).length > 0 ? changes : undefined },
+      );
+    }
+
+    return updatedUser;
   }
 
   async remove(id: string, context: TenantContext) {
     // Verify user exists and is accessible
-    await this.findOne(id, context);
+    const user = await this.findOne(id, context);
 
-    return this.prisma.user.update({
+    const deletedUser = await this.prisma.user.update({
       where: { id },
       data: { isActive: false },
     });
+
+    // Record audit log
+    if (this.auditService) {
+      await this.auditService.recordFromContext(
+        context,
+        AuditAction.DELETE,
+        'User',
+        deletedUser.id,
+        { email: user.email },
+      );
+    }
+
+    return deletedUser;
   }
 }

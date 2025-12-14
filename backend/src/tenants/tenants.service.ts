@@ -1,12 +1,17 @@
-import { Injectable, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { Injectable, ForbiddenException, NotFoundException, Inject, Optional } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateTenantDto } from './dto/create-tenant.dto';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { TenantContext } from '../common/context/tenant.context';
+import { AuditService } from '../audit/audit.service';
+import { AuditAction } from '@prisma/client';
 
 @Injectable()
 export class TenantsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    @Optional() @Inject(AuditService) private auditService?: AuditService,
+  ) {}
 
   async create(createTenantDto: CreateTenantDto, context: TenantContext) {
     // Only SUPER_ADMIN can create tenants
@@ -14,9 +19,22 @@ export class TenantsService {
       throw new ForbiddenException('Only SUPER_ADMIN can create tenants');
     }
 
-    return this.prisma.tenant.create({
+    const tenant = await this.prisma.tenant.create({
       data: createTenantDto,
     });
+
+    // Record audit log
+    if (this.auditService) {
+      await this.auditService.recordFromContext(
+        context,
+        AuditAction.CREATE,
+        'Tenant',
+        tenant.id,
+        { name: tenant.name, slug: tenant.slug },
+      );
+    }
+
+    return tenant;
   }
 
   async findAll(context: TenantContext) {
@@ -60,12 +78,33 @@ export class TenantsService {
     }
 
     // Verify tenant exists
-    await this.findOne(id, context);
+    const tenant = await this.findOne(id, context);
 
-    return this.prisma.tenant.update({
+    const updatedTenant = await this.prisma.tenant.update({
       where: { id },
       data: updateTenantDto,
     });
+
+    // Record audit log
+    if (this.auditService) {
+      const changes: Record<string, any> = {};
+      if (updateTenantDto.name && updateTenantDto.name !== tenant.name) {
+        changes.name = { from: tenant.name, to: updateTenantDto.name };
+      }
+      if (updateTenantDto.slug && updateTenantDto.slug !== tenant.slug) {
+        changes.slug = { from: tenant.slug, to: updateTenantDto.slug };
+      }
+
+      await this.auditService.recordFromContext(
+        context,
+        AuditAction.UPDATE,
+        'Tenant',
+        updatedTenant.id,
+        { name: updatedTenant.name, changes: Object.keys(changes).length > 0 ? changes : undefined },
+      );
+    }
+
+    return updatedTenant;
   }
 
   async remove(id: string, context: TenantContext) {
@@ -75,11 +114,24 @@ export class TenantsService {
     }
 
     // Verify tenant exists
-    await this.findOne(id, context);
+    const tenant = await this.findOne(id, context);
 
-    return this.prisma.tenant.update({
+    const deletedTenant = await this.prisma.tenant.update({
       where: { id },
       data: { isActive: false },
     });
+
+    // Record audit log
+    if (this.auditService) {
+      await this.auditService.recordFromContext(
+        context,
+        AuditAction.DELETE,
+        'Tenant',
+        deletedTenant.id,
+        { name: tenant.name },
+      );
+    }
+
+    return deletedTenant;
   }
 }

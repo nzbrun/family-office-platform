@@ -192,6 +192,13 @@ curl -H "Authorization: Bearer <superadmin-token>" \
 - `PATCH /tenants/:id` - Actualizar tenant (SUPER_ADMIN only)
 - `DELETE /tenants/:id` - Eliminar tenant (soft delete, SUPER_ADMIN only)
 
+### Audit Logs (Requiere autenticación JWT)
+- `GET /audit-logs` - Listar logs de auditoría con paginación y filtros (SUPER_ADMIN/ADMIN)
+  - Filtros: `tenantId`, `actorUserId`, `action`, `entity`, `startDate`, `endDate`
+  - Paginación: `page`, `limit` (max 100)
+  - SUPER_ADMIN puede ver todos los logs o filtrar por tenant
+  - ADMIN solo ve logs de su tenant
+
 ## Base de Datos
 
 ### Configuración Inicial
@@ -515,12 +522,59 @@ Los tests e2e validan:
    - USER puede acceder a /users/me
    - USER NO puede listar usuarios (403)
 
+## Auditoría
+
+El sistema implementa un **sistema de auditoría mínima** que registra todas las acciones importantes:
+
+### Eventos Auditados
+
+- **LOGIN**: Intentos de login (exitosos y fallidos)
+- **CREATE**: Creación de usuarios y tenants
+- **UPDATE**: Actualización de usuarios y tenants
+- **DELETE**: Eliminación (soft delete) de usuarios y tenants
+
+### Información Registrada
+
+Cada log de auditoría incluye:
+- `tenantId`: ID del tenant (nullable para SUPER_ADMIN)
+- `actorUserId`: ID del usuario que realizó la acción
+- `actorRole`: Rol del usuario (SUPER_ADMIN, ADMIN, USER)
+- `action`: Tipo de acción (LOGIN, CREATE, UPDATE, DELETE)
+- `entity`: Tipo de entidad (User, Tenant)
+- `entityId`: ID de la entidad afectada
+- `metadata`: Información adicional (JSON)
+- `requestId`: ID de la request para correlación con logs
+- `createdAt`: Timestamp del evento
+
+### Acceso a Audit Logs
+
+- **SUPER_ADMIN**: Puede ver todos los logs o filtrar por tenant
+- **ADMIN**: Solo puede ver logs de su tenant
+- **USER**: Sin acceso a audit logs
+
+### Ejemplo de Uso
+
+```bash
+# Listar todos los logs (SUPER_ADMIN)
+curl -X GET "http://localhost:3000/audit-logs?page=1&limit=20" \
+  -H "Authorization: Bearer $SUPER_TOKEN"
+
+# Filtrar por tenant
+curl -X GET "http://localhost:3000/audit-logs?tenantId=$TENANT_ID&action=CREATE" \
+  -H "Authorization: Bearer $SUPER_TOKEN"
+
+# Filtrar por rango de fechas
+curl -X GET "http://localhost:3000/audit-logs?startDate=2024-01-01&endDate=2024-01-31" \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+```
+
 ## Próximos Pasos
 
 - [x] Implementar migraciones de Prisma
 - [x] Implementar seed para desarrollo
 - [x] Implementar multi-tenancy con aislamiento real
 - [x] Agregar tests e2e para multi-tenancy
+- [x] Implementar sistema de auditoría
 - [ ] Agregar tests unitarios
 - [ ] Implementar refresh tokens
 - [ ] Agregar rate limiting

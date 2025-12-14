@@ -1,8 +1,10 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, Inject, Optional } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { UsersService } from '../users/users.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
+import { AuditService } from '../audit/audit.service';
+import { AuditAction, Role } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 
 @Injectable()
@@ -10,18 +12,43 @@ export class AuthService {
   constructor(
     private usersService: UsersService,
     private jwtService: JwtService,
+    @Optional() @Inject(AuditService) private auditService?: AuditService,
   ) {}
 
   async validateUser(email: string, password: string) {
     const user = await this.usersService.findByEmail(email);
     
     if (!user || !user.isActive) {
+      // Record failed login attempt
+      if (this.auditService) {
+        await this.auditService.record({
+          action: AuditAction.LOGIN,
+          entity: 'User',
+          entityId: null,
+          metadata: { email, success: false, reason: 'User not found or inactive' },
+          tenantId: user?.tenantId || null,
+          actorUserId: user?.id || 'unknown',
+          actorRole: user?.role || Role.USER,
+        });
+      }
       throw new UnauthorizedException('Invalid credentials');
     }
 
     const isPasswordValid = await bcrypt.compare(password, user.password);
     
     if (!isPasswordValid) {
+      // Record failed login attempt
+      if (this.auditService) {
+        await this.auditService.record({
+          action: AuditAction.LOGIN,
+          entity: 'User',
+          entityId: user.id,
+          metadata: { email, success: false, reason: 'Invalid password' },
+          tenantId: user.tenantId,
+          actorUserId: user.id,
+          actorRole: user.role,
+        });
+      }
       throw new UnauthorizedException('Invalid credentials');
     }
 
@@ -39,6 +66,19 @@ export class AuthService {
       tenantId: user.role === 'SUPER_ADMIN' ? null : user.tenantId,
       role: user.role,
     };
+
+    // Record successful login
+    if (this.auditService) {
+      await this.auditService.record({
+        action: AuditAction.LOGIN,
+        entity: 'User',
+        entityId: user.id,
+        metadata: { email: user.email, success: true },
+        tenantId: user.tenantId,
+        actorUserId: user.id,
+        actorRole: user.role,
+      });
+    }
 
     return {
       access_token: this.jwtService.sign(payload),
