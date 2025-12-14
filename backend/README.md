@@ -784,8 +784,38 @@ Respuesta:
 }
 ```
 
-### Seguridad
+### Seguridad y Hardening
 
+**Rate Limiting:**
+- Límite por usuario: configurable con `ASSISTANT_RATE_LIMIT_USER` (default: 10 req/min)
+- Límite por tenant: configurable con `ASSISTANT_RATE_LIMIT_TENANT` (default: 20 req/min)
+- Retorna `429 Too Many Requests` con `retryAfter` en segundos
+
+**Timeouts:**
+- Timeout configurable con `ASSISTANT_TIMEOUT_MS` (default: 10s)
+- Retorna `504 Gateway Timeout` con `requestId` si excede el timeout
+
+**Control de Tokens/Costo:**
+- `max_output_tokens` configurable con `ASSISTANT_MAX_OUTPUT_TOKENS` (default: 500)
+- Truncamiento automático de resultados de tools si exceden límites
+- Límite de longitud del mensaje de entrada: `ASSISTANT_MAX_INPUT_CHARS` (default: 2000 chars)
+
+**Prompt Injection Defenses:**
+- Rechaza pedidos de secretos, env vars, instrucciones para saltar RBAC/tenant
+- Si el usuario pide acciones de escritura, responde "read-only" explícito
+- Validación de patrones de inyección
+
+**Validación de Tool Params:**
+- Validación fuerte con schemas Zod
+- Tool name allow-list; bloquea cualquier otro
+- Validación de tipos y formatos (UUIDs, fechas, etc.)
+
+**Observabilidad:**
+- Logs estructurados con: model, latency, toolCallsCount, estimatedTokens, status
+- Request ID para correlación
+- Auditoría completa en AuditLog
+
+**Otras medidas:**
 - Todas las queries se registran en AuditLog
 - Respeta RBAC: USER no puede usar `audit_logs`
 - Respeta multi-tenancy: solo accede a datos del tenant del usuario

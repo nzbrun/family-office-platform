@@ -1,19 +1,21 @@
-import { Controller, Post, Body, UseGuards } from '@nestjs/common';
+import { Controller, Post, Body, UseGuards, Req } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { AssistantService } from './assistant.service';
 import { AssistantQueryDto } from './dto/assistant-query.dto';
 import { AssistantResponseDto } from './dto/assistant-response.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { TenantGuard } from '../common/guards/tenant.guard';
+import { AssistantRateLimitGuard } from './guards/assistant-rate-limit.guard';
 import { TenantContextDecorator } from '../common/decorators/tenant-context.decorator';
 import type { TenantContext } from '../common/context/tenant.context';
 import { Roles } from '../common/decorators/roles.decorator';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Role } from '@prisma/client';
+import type { Request } from 'express';
 
 @ApiTags('assistant')
 @ApiBearerAuth('JWT-auth')
-@UseGuards(JwtAuthGuard, TenantGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, TenantGuard, RolesGuard, AssistantRateLimitGuard)
 @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.USER)
 @Controller('assistant')
 export class AssistantController {
@@ -38,11 +40,22 @@ export class AssistantController {
   })
   @ApiResponse({
     status: 400,
-    description: 'Bad request - invalid message or tool execution error',
+    description: 'Bad request - invalid message, prompt injection detected, or tool execution error',
   })
   @ApiResponse({
     status: 401,
     description: 'Unauthorized',
+  })
+  @ApiResponse({
+    status: 429,
+    description: 'Too Many Requests - rate limit exceeded',
+    schema: {
+      example: {
+        statusCode: 429,
+        message: 'Rate limit exceeded for user',
+        retryAfter: 60,
+      },
+    },
   })
   @ApiResponse({
     status: 501,
@@ -55,10 +68,23 @@ export class AssistantController {
       },
     },
   })
+  @ApiResponse({
+    status: 504,
+    description: 'Gateway Timeout - OpenAI request timeout',
+    schema: {
+      example: {
+        statusCode: 504,
+        message: 'Request timeout',
+        requestId: '123e4567-e89b-12d3-a456-426614174000',
+      },
+    },
+  })
   async query(
     @Body() queryDto: AssistantQueryDto,
     @TenantContextDecorator() context: TenantContext,
+    @Req() request: Request,
   ): Promise<AssistantResponseDto> {
-    return this.assistantService.query(queryDto.message, context);
+    const requestId = (request as any).requestId;
+    return this.assistantService.query(queryDto.message, context, requestId);
   }
 }

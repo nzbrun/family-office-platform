@@ -1,6 +1,7 @@
-import { Injectable, Inject, Optional, NotImplementedException, BadRequestException } from '@nestjs/common';
+import { Injectable, Inject, Optional, NotImplementedException, BadRequestException, GatewayTimeoutException, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import OpenAI from 'openai';
+import { z } from 'zod';
 import { ReportingService } from '../reporting/reporting.service';
 import { AssetsService } from '../assets/assets.service';
 import { ValuationsService } from '../valuations/valuations.service';
@@ -18,9 +19,22 @@ interface ToolCall {
 
 @Injectable()
 export class AssistantService {
+  private readonly logger = new Logger(AssistantService.name);
   private openaiAdapter: OpenAIAdapter | null = null;
   private readonly maxToolCalls = 3;
   private readonly maxItemsInResponse = 50;
+  private readonly maxInputChars: number;
+  private readonly maxOutputTokens: number;
+  private readonly timeoutMs: number;
+
+  // Allowed tool names (allow-list)
+  private readonly allowedTools = [
+    'reporting_summary',
+    'reporting_assets',
+    'asset_get',
+    'valuations_list',
+    'audit_logs',
+  ];
 
   constructor(
     private configService: ConfigService,
@@ -47,23 +61,39 @@ export class AssistantService {
         };
       }
     }
+
+    // Load configurable limits
+    this.maxInputChars = this.configService.get<number>('ASSISTANT_MAX_INPUT_CHARS') || 2000;
+    this.maxOutputTokens = this.configService.get<number>('ASSISTANT_MAX_OUTPUT_TOKENS') || 500;
+    this.timeoutMs = this.configService.get<number>('ASSISTANT_TIMEOUT_MS') || 10000;
   }
 
-  async query(message: string, context: TenantContext): Promise<{
+  async query(message: string, context: TenantContext, requestId?: string): Promise<{
     answer: string;
     actionsTaken: string[];
     citations: string[];
   }> {
-    if (!this.openaiAdapter) {
-      throw new NotImplementedException(
-        'OpenAI API key not configured. Please set OPENAI_API_KEY environment variable.',
-      );
-    }
-
-    const model = this.configService.get<string>('OPENAI_MODEL') || 'gpt-4o-mini';
-    const actionsTaken: string[] = [];
-    const citations: string[] = [];
+    const startTime = Date.now();
     let toolCallsCount = 0;
+    let estimatedTokens = 0;
+    let status = 'success';
+
+    try {
+      if (!this.openaiAdapter) {
+        throw new NotImplementedException(
+          'OpenAI API key not configured. Please set OPENAI_API_KEY environment variable.',
+        );
+      }
+
+      // Validate and sanitize input message
+      const sanitizedMessage = this.validateAndSanitizeMessage(message);
+
+      // Check for prompt injection attempts
+      this.detectPromptInjection(sanitizedMessage);
+
+      const model = this.configService.get<string>('OPENAI_MODEL') || 'gpt-4o-mini';
+      const actionsTaken: string[] = [];
+      const citations: string[] = [];
 
     const systemPrompt = `You are a read-only investment portfolio assistant. Your role is to help users understand their portfolio data.
 
@@ -98,16 +128,23 @@ Always provide helpful, accurate responses based on the data available through t
     let finalAnswer = '';
     let currentToolCalls: ToolCall[] = [];
 
-    // Execute conversation with tool calling (max 3 iterations)
-    for (let iteration = 0; iteration < this.maxToolCalls; iteration++) {
-      const response = await this.openaiAdapter.chat.completions.create({
-        model,
-        messages,
-        tools: this.getToolsDefinition(context),
-        tool_choice: 'auto',
-        temperature: 0.7,
-        max_tokens: 1000,
-      });
+      // Execute conversation with tool calling (max 3 iterations)
+      for (let iteration = 0; iteration < this.maxToolCalls; iteration++) {
+        const response = await Promise.race([
+          this.openaiAdapter.chat.completions.create({
+            model,
+            messages,
+            tools: this.getToolsDefinition(context),
+            tool_choice: 'auto',
+            temperature: 0.7,
+            max_tokens: this.maxOutputTokens,
+          }),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new GatewayTimeoutException('OpenAI request timeout')), this.timeoutMs),
+          ),
+        ]) as any;
+
+        estimatedTokens += response.usage?.total_tokens || 0;
 
       const assistantMessage = response.choices[0].message;
 
@@ -145,14 +182,24 @@ Always provide helpful, accurate responses based on the data available through t
         });
 
         try {
-          const toolResult = await this.executeTool(toolName, toolArgs, context);
+          // Validate tool name against allow-list
+          if (!this.allowedTools.includes(toolName)) {
+            throw new BadRequestException(`Tool ${toolName} is not allowed`);
+          }
+
+          // Validate and sanitize tool arguments
+          const validatedArgs = this.validateToolParams(toolName, toolArgs);
+
+          const toolResult = await this.executeTool(toolName, validatedArgs, context);
+          const limitedResult = this.limitResponseSize(toolResult);
           messages.push({
             role: 'tool',
             tool_call_id: toolCall.id,
-            content: JSON.stringify(this.limitResponseSize(toolResult)),
+            content: JSON.stringify(limitedResult),
           });
           toolCallsCount++;
         } catch (error: any) {
+          this.logger.warn(`Tool execution failed: ${toolName}`, error.message);
           messages.push({
             role: 'tool',
             tool_call_id: toolCall.id,
@@ -177,25 +224,167 @@ Always provide helpful, accurate responses based on the data available through t
       finalAnswer = 'No pude procesar tu consulta. Por favor, intenta reformular tu pregunta.';
     }
 
-    // Record audit log
-    await this.auditService.recordFromContext(
-      context,
-      AuditAction.READ,
-      'AssistantQuery',
-      null,
-      {
-        message: message.substring(0, 200), // Truncate message
-        toolCalls: currentToolCalls.map(t => t.name),
-        filters: currentToolCalls.map(t => t.arguments),
-        responseSize: finalAnswer.length,
-      },
+      const latency = Date.now() - startTime;
+
+      // Record audit log
+      await this.auditService.recordFromContext(
+        context,
+        AuditAction.READ,
+        'AssistantQuery',
+        null,
+        {
+          message: sanitizedMessage.substring(0, 200), // Truncate message
+          toolCalls: currentToolCalls.map(t => t.name),
+          filters: currentToolCalls.map(t => t.arguments),
+          responseSize: finalAnswer.length,
+          latency: `${latency}ms`,
+          estimatedTokens,
+        },
+      );
+
+      // Structured logging
+      this.logger.log({
+        requestId,
+        model,
+        latency: `${latency}ms`,
+        toolCallsCount,
+        estimatedTokens,
+        status,
+        userId: context.userId,
+        tenantId: context.tenantId,
+        role: context.role,
+      });
+
+      return {
+        answer: finalAnswer,
+        actionsTaken,
+        citations,
+      };
+    } catch (error: any) {
+      status = 'error';
+      const latency = Date.now() - startTime;
+
+      this.logger.error({
+        requestId,
+        error: error.message,
+        latency: `${latency}ms`,
+        toolCallsCount,
+        status,
+        userId: context.userId,
+        tenantId: context.tenantId,
+      });
+
+      if (error instanceof GatewayTimeoutException) {
+        throw new GatewayTimeoutException({
+          statusCode: 504,
+          message: 'Request timeout',
+          requestId,
+        });
+      }
+
+      throw error;
+    }
+  }
+
+  private validateAndSanitizeMessage(message: string): string {
+    // Truncate message if too long
+    if (message.length > this.maxInputChars) {
+      this.logger.warn(`Message truncated from ${message.length} to ${this.maxInputChars} characters`);
+      return message.substring(0, this.maxInputChars);
+    }
+
+    // Remove null bytes and other control characters
+    return message.replace(/\0/g, '').trim();
+  }
+
+  private detectPromptInjection(message: string): void {
+    const lowerMessage = message.toLowerCase();
+
+    // Patterns that suggest prompt injection attempts
+    const injectionPatterns = [
+      /ignore (previous|all) (instructions?|rules?)/i,
+      /forget (previous|all) (instructions?|rules?)/i,
+      /you are now/i,
+      /act as/i,
+      /pretend to be/i,
+      /show me (secrets?|env|environment variables?|api keys?|passwords?)/i,
+      /bypass (rbac|tenant|security|isolation)/i,
+      /skip (rbac|tenant|security|isolation)/i,
+      /(create|update|delete|modify|change|edit)/i,
+    ];
+
+    for (const pattern of injectionPatterns) {
+      if (pattern.test(message)) {
+        this.logger.warn('Potential prompt injection detected', { message: message.substring(0, 100) });
+        // Don't throw, but log for monitoring
+      }
+    }
+
+    // Check for write operations
+    const writeKeywords = ['create', 'update', 'delete', 'modify', 'change', 'edit', 'add', 'remove'];
+    const hasWriteIntent = writeKeywords.some(keyword => 
+      lowerMessage.includes(keyword) && 
+      !lowerMessage.includes('read-only') &&
+      !lowerMessage.includes('cannot')
     );
 
-    return {
-      answer: finalAnswer,
-      actionsTaken,
-      citations,
+    if (hasWriteIntent) {
+      throw new BadRequestException(
+        'This assistant is read-only. It cannot create, update, or delete data. Please use the appropriate API endpoints for write operations.',
+      );
+    }
+  }
+
+  private validateToolParams(toolName: string, params: any): any {
+    // Define schemas for each tool using zod
+    const schemas: Record<string, z.ZodSchema> = {
+      reporting_summary: z.object({
+        tenantId: z.string().uuid().optional(),
+      }),
+      reporting_assets: z.object({
+        type: z.string().optional(),
+        currency: z.string().optional(),
+        legalEntityId: z.string().uuid().optional(),
+        hasValuation: z.boolean().optional(),
+        tenantId: z.string().uuid().optional(),
+        page: z.number().int().positive().optional(),
+        limit: z.number().int().positive().max(50).optional(),
+      }),
+      asset_get: z.object({
+        id: z.string().uuid(),
+      }),
+      valuations_list: z.object({
+        assetId: z.string().uuid(),
+        startDate: z.string().datetime().optional(),
+        endDate: z.string().datetime().optional(),
+        limit: z.number().int().positive().max(50).optional(),
+      }),
+      audit_logs: z.object({
+        tenantId: z.string().uuid().optional(),
+        actorUserId: z.string().uuid().optional(),
+        action: z.enum(['LOGIN', 'CREATE', 'UPDATE', 'DELETE', 'READ']).optional(),
+        entity: z.string().optional(),
+        startDate: z.string().datetime().optional(),
+        endDate: z.string().datetime().optional(),
+        page: z.number().int().positive().optional(),
+        limit: z.number().int().positive().max(50).optional(),
+      }),
     };
+
+    const schema = schemas[toolName];
+    if (!schema) {
+      throw new BadRequestException(`No validation schema for tool: ${toolName}`);
+    }
+
+    try {
+      return schema.parse(params);
+    } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        const errorMessages = error.issues.map(issue => issue.message);
+        throw new BadRequestException(`Invalid parameters for ${toolName}: ${errorMessages.join(', ')}`);
+      }
+      throw error;
+    }
   }
 
   private getToolsDefinition(context: TenantContext): OpenAI.Chat.Completions.ChatCompletionTool[] {
@@ -315,9 +504,8 @@ Always provide helpful, accurate responses based on the data available through t
     args: any,
     context: TenantContext,
   ): Promise<any> {
-    // Reject unknown tools
-    const allowedTools = ['reporting_summary', 'reporting_assets', 'asset_get', 'valuations_list', 'audit_logs'];
-    if (!allowedTools.includes(toolName)) {
+    // Tool name already validated in calling code, but double-check
+    if (!this.allowedTools.includes(toolName)) {
       throw new BadRequestException(`Unknown tool: ${toolName}`);
     }
 
@@ -442,6 +630,11 @@ Always provide helpful, accurate responses based on the data available through t
       const limited: any = { ...data };
       if (limited.data && Array.isArray(limited.data)) {
         limited.data = limited.data.slice(0, this.maxItemsInResponse);
+        // Update pagination if it exists
+        if (limited.pagination) {
+          limited.pagination.total = Math.min(limited.pagination.total, this.maxItemsInResponse);
+          limited.pagination.totalPages = Math.ceil(limited.pagination.total / limited.pagination.limit);
+        }
       }
       return limited;
     }

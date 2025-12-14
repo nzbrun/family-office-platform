@@ -1,7 +1,10 @@
 import { Module } from '@nestjs/common';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { APP_GUARD } from '@nestjs/core';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { ConfigModule } from './config/config.module';
+import { ConfigService } from '@nestjs/config';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
@@ -17,6 +20,18 @@ import { AssistantModule } from './assistant/assistant.module';
 @Module({
   imports: [
     ConfigModule,
+    ThrottlerModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => ({
+        throttlers: [
+          {
+            ttl: 60000, // 1 minute
+            limit: config.get<number>('ASSISTANT_RATE_LIMIT_USER') || 10,
+          },
+        ],
+      }),
+    }),
     PrismaModule,
     AuthModule,
     UsersModule,

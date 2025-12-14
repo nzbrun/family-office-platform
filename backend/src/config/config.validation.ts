@@ -32,6 +32,26 @@ class EnvironmentVariables {
   @IsString()
   @IsOptional()
   OPENAI_MODEL?: string;
+
+  @IsNumber()
+  @IsOptional()
+  ASSISTANT_RATE_LIMIT_USER?: number;
+
+  @IsNumber()
+  @IsOptional()
+  ASSISTANT_RATE_LIMIT_TENANT?: number;
+
+  @IsNumber()
+  @IsOptional()
+  ASSISTANT_TIMEOUT_MS?: number;
+
+  @IsNumber()
+  @IsOptional()
+  ASSISTANT_MAX_OUTPUT_TOKENS?: number;
+
+  @IsNumber()
+  @IsOptional()
+  ASSISTANT_MAX_INPUT_CHARS?: number;
 }
 
 export function validate(config: Record<string, unknown>) {
