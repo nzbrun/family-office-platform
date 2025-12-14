@@ -2,7 +2,7 @@ import { Injectable, Inject, Optional } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContext } from '../common/context/tenant.context';
 import { AuditService } from '../audit/audit.service';
-import { AuditAction } from '@prisma/client';
+import { AuditAction, Prisma } from '@prisma/client';
 import { AssetsQueryDto } from './dto/assets-query.dto';
 
 @Injectable()
@@ -11,6 +11,52 @@ export class ReportingService {
     private prisma: PrismaService,
     @Optional() @Inject(AuditService) private auditService?: AuditService,
   ) {}
+
+  /**
+   * Efficiently get latest valuation per asset using SQL ROW_NUMBER()
+   * This avoids loading all valuations in memory by using a window function
+   * Returns only the most recent valuation per asset
+   */
+  private async getLatestValuationsByAssetIds(assetIds: string[]): Promise<Map<string, { date: Date; value: any; currency: string }>> {
+    if (assetIds.length === 0) {
+      return new Map();
+    }
+
+    // Use a subquery with ROW_NUMBER() to get only the latest valuation per asset
+    // This is more efficient than loading all valuations and filtering in memory
+    // assetIds come from the database, so they're safe to use in the query
+    const placeholders = assetIds.map((_, i) => `$${i + 1}`).join(',');
+    const query = `
+      SELECT id, "assetId", date, value, currency
+      FROM (
+        SELECT 
+          id, "assetId", date, value, currency,
+          ROW_NUMBER() OVER (PARTITION BY "assetId" ORDER BY date DESC) as rn
+        FROM valuations
+        WHERE "assetId" IN (${placeholders})
+      ) ranked
+      WHERE rn = 1
+    `;
+
+    const latestValuations = await this.prisma.$queryRawUnsafe<Array<{
+      id: string;
+      assetId: string;
+      date: Date;
+      value: any;
+      currency: string;
+    }>>(query, ...assetIds);
+
+    const valuationMap = new Map<string, { date: Date; value: any; currency: string }>();
+    latestValuations.forEach((v) => {
+      valuationMap.set(v.assetId, {
+        date: v.date,
+        value: v.value, // Prisma Decimal, will be converted to string in JSON
+        currency: v.currency,
+      });
+    });
+
+    return valuationMap;
+  }
 
   async getAssets(query: AssetsQueryDto, context: TenantContext) {
     const page = query.page || 1;
@@ -51,35 +97,9 @@ export class ReportingService {
       orderBy: { createdAt: 'desc' },
     });
 
-    // Get latest valuations for all assets
+    // Get latest valuations efficiently using SQL ROW_NUMBER() (avoids loading all valuations)
     const assetIds = allAssets.map((asset) => asset.id);
-    const allValuations = await this.prisma.valuation.findMany({
-      where: {
-        assetId: { in: assetIds },
-      },
-      orderBy: { date: 'desc' },
-    });
-
-    // Get latest valuation per asset
-    const latestValuationsMap = new Map<string, typeof allValuations[0]>();
-    allValuations.forEach((valuation) => {
-      if (!latestValuationsMap.has(valuation.assetId)) {
-        latestValuationsMap.set(valuation.assetId, valuation);
-      }
-    });
-    const latestValuations = Array.from(latestValuationsMap.values());
-
-    // Create a map of assetId -> latest valuation
-    const valuationMap = new Map(
-      latestValuations.map((v) => [
-        v.assetId,
-        {
-          date: v.date,
-          value: v.value,
-          currency: v.currency,
-        },
-      ]),
-    );
+    const valuationMap = await this.getLatestValuationsByAssetIds(assetIds);
 
     // Add latestValuation to all assets
     let assetsWithValuations = allAssets.map((asset) => ({
@@ -138,7 +158,7 @@ export class ReportingService {
       effectiveTenantId = context.tenantId!;
     }
 
-    // Get all assets with their latest valuations
+    // Get all assets
     const assets = await this.prisma.asset.findMany({
       where: {
         tenantId: effectiveTenantId,
@@ -148,34 +168,9 @@ export class ReportingService {
       },
     });
 
-    // Get latest valuations for all assets
+    // Get latest valuations efficiently using SQL ROW_NUMBER() (avoids loading all valuations)
     const assetIds = assets.map((asset) => asset.id);
-    const allValuations = await this.prisma.valuation.findMany({
-      where: {
-        assetId: { in: assetIds },
-      },
-      orderBy: { date: 'desc' },
-    });
-
-    // Get latest valuation per asset
-    const latestValuationsMap = new Map<string, typeof allValuations[0]>();
-    allValuations.forEach((valuation) => {
-      if (!latestValuationsMap.has(valuation.assetId)) {
-        latestValuationsMap.set(valuation.assetId, valuation);
-      }
-    });
-    const latestValuations = Array.from(latestValuationsMap.values());
-
-    // Create a map of assetId -> latest valuation
-    const valuationMap = new Map(
-      latestValuations.map((v) => [
-        v.assetId,
-        {
-          value: v.value,
-          currency: v.currency,
-        },
-      ]),
-    );
+    const latestValuationsMap = await this.getLatestValuationsByAssetIds(assetIds);
 
     // Calculate totals
     const totalsByCurrency = new Map<string, number>();
@@ -184,7 +179,11 @@ export class ReportingService {
     let assetsWithoutValuationCount = 0;
 
     assets.forEach((asset) => {
-      const valuation = valuationMap.get(asset.id);
+      const latestValuation = latestValuationsMap.get(asset.id);
+      const valuation = latestValuation ? {
+        value: latestValuation.value,
+        currency: latestValuation.currency,
+      } : null;
 
       if (valuation) {
         // Add to currency totals
