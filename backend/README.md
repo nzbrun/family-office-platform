@@ -222,6 +222,14 @@ curl -H "Authorization: Bearer <superadmin-token>" \
 - `PATCH /valuations/:id` - Actualizar valuación
 - `DELETE /valuations/:id` - Eliminar valuación
 
+### Reporting (Requiere autenticación JWT)
+- `GET /reporting/assets` - Listar assets con latestValuation para reporting (todos los roles)
+  - Filtros: `type`, `currency`, `legalEntityId`, `hasValuation` (true/false)
+  - Paginación: `page`, `limit` (max 100)
+  - SUPER_ADMIN puede filtrar por `tenantId` (query param o X-Tenant-Id header)
+- `GET /reporting/summary` - Resumen agregado con totals por currency, type y legal entity (todos los roles)
+  - SUPER_ADMIN puede filtrar por `tenantId` (query param o X-Tenant-Id header)
+
 ## Base de Datos
 
 ### Configuración Inicial
@@ -660,6 +668,54 @@ curl -X POST http://localhost:3000/valuations \
 - SUPER_ADMIN puede acceder a todos los recursos
 - Todas las operaciones CRUD registran auditoría
 
+## Reporting
+
+El sistema incluye un módulo de **reporting v1 (solo lectura)** basado en la última valuación por asset.
+
+### Endpoints de Reporting
+
+**GET /reporting/assets:**
+- Retorna assets del tenant con `latestValuation` y `legalEntity` (si existe)
+- Filtros disponibles:
+  - `type`: Filtrar por tipo de asset
+  - `currency`: Filtrar por moneda
+  - `legalEntityId`: Filtrar por entidad legal
+  - `hasValuation`: Filtrar por si tiene valuación (true/false)
+  - `tenantId`: Filtrar por tenant (SUPER_ADMIN only)
+- Paginación: `page` (default 1), `limit` (default 20, max 100)
+
+**GET /reporting/summary:**
+- Calcula agregados basados en la última valuación por asset:
+  - `totalsByCurrency`: Totales agrupados por moneda
+  - `totalsByAssetType`: Totales agrupados por tipo de asset
+  - `totalsByLegalEntity`: Totales agrupados por entidad legal (solo assets con legalEntityId)
+  - `assetsWithoutValuationCount`: Cantidad de assets sin valuación
+  - `assetsCount`: Total de assets
+- SUPER_ADMIN puede filtrar por `tenantId` (query param o X-Tenant-Id header)
+
+### Ejemplo de Uso
+
+```bash
+# Obtener assets con valuaciones
+curl -X GET "http://localhost:3000/reporting/assets?hasValuation=true&type=EQUITY" \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+
+# Obtener resumen
+curl -X GET "http://localhost:3000/reporting/summary" \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+
+# SUPER_ADMIN filtrando por tenant
+curl -X GET "http://localhost:3000/reporting/summary?tenantId=$TENANT_ID" \
+  -H "Authorization: Bearer $SUPER_TOKEN"
+```
+
+### Auditoría
+
+Todas las llamadas a reporting se registran en AuditLog con:
+- `action`: READ
+- `entity`: Reporting
+- `metadata`: Endpoint y filtros aplicados
+
 ## Próximos Pasos
 
 - [x] Implementar migraciones de Prisma
@@ -668,6 +724,7 @@ curl -X POST http://localhost:3000/valuations \
 - [x] Agregar tests e2e para multi-tenancy
 - [x] Implementar sistema de auditoría
 - [x] Implementar dominio de inversiones v1
+- [x] Implementar reporting v1
 - [ ] Agregar tests unitarios
 - [ ] Implementar refresh tokens
 - [ ] Agregar rate limiting

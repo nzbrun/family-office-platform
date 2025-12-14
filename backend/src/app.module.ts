@@ -11,6 +11,7 @@ import { AuditModule } from './audit/audit.module';
 import { LegalEntitiesModule } from './legal-entities/legal-entities.module';
 import { AssetsModule } from './assets/assets.module';
 import { ValuationsModule } from './valuations/valuations.module';
+import { ReportingModule } from './reporting/reporting.module';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { ValuationsModule } from './valuations/valuations.module';
     LegalEntitiesModule,
     AssetsModule,
     ValuationsModule,
+    ReportingModule,
   ],
   controllers: [AppController],
   providers: [AppService],
