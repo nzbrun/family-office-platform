@@ -1,7 +1,10 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { ProtectedRoute } from '@/components/protected-route';
+import { useAuth } from '@/contexts/auth-context';
+import { Button } from '@/components/ui/button';
 import { KPICard } from '@/components/kpi-card';
 import { AssetsTable } from '@/components/assets-table';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -9,6 +12,7 @@ import { apiClient } from '@/lib/api';
 import type { ReportingSummary, AssetsResponse } from '@/types/reporting';
 
 export default function DashboardPage() {
+  const { logout } = useAuth();
   const [summary, setSummary] = useState<ReportingSummary | null>(null);
   const [assets, setAssets] = useState<AssetsResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -61,10 +65,22 @@ export default function DashboardPage() {
   return (
     <ProtectedRoute>
       <div className="min-h-screen bg-gray-50">
+        <header className="border-b bg-white">
+          <div className="container mx-auto flex h-16 items-center justify-between px-4">
+            <h1 className="text-xl font-semibold">Dashboard</h1>
+            <div className="flex items-center gap-4">
+              <Link href="/assistant" className="text-sm font-medium text-gray-600 hover:text-gray-900">
+                Assistant
+              </Link>
+              <Button variant="outline" onClick={logout}>
+                Logout
+              </Button>
+            </div>
+          </div>
+        </header>
         <div className="container mx-auto px-4 py-8">
           <div className="space-y-6">
             <div>
-              <h1 className="text-3xl font-bold">Dashboard</h1>
               <p className="text-gray-600">Overview of your investment portfolio</p>
             </div>
 
