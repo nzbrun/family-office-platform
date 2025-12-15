@@ -16,17 +16,34 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+const TOKEN_KEY = 'portfolio_manager_token';
+const USER_KEY = 'portfolio_manager_user';
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const router = useRouter();
 
-  // Initialize auth state from memory (not localStorage)
+  // Initialize auth state from localStorage
   useEffect(() => {
-    // In a real app, you might check for token in memory
-    // For now, we start with no auth
-    setIsLoading(false);
+    try {
+      const storedToken = localStorage.getItem(TOKEN_KEY);
+      const storedUser = localStorage.getItem(USER_KEY);
+
+      if (storedToken && storedUser) {
+        const parsedUser = JSON.parse(storedUser) as User;
+        setToken(storedToken);
+        setUser(parsedUser);
+        apiClient.setToken(storedToken);
+      }
+    } catch (error) {
+      // If there's an error parsing, clear corrupted data
+      localStorage.removeItem(TOKEN_KEY);
+      localStorage.removeItem(USER_KEY);
+    } finally {
+      setIsLoading(false);
+    }
   }, []);
 
   const login = useCallback(async (credentials: LoginRequest) => {
@@ -35,6 +52,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         '/auth/login',
         credentials
       );
+      
+      // Persist to localStorage
+      localStorage.setItem(TOKEN_KEY, response.access_token);
+      localStorage.setItem(USER_KEY, JSON.stringify(response.user));
       
       setToken(response.access_token);
       setUser(response.user);
@@ -47,6 +68,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [router]);
 
   const logout = useCallback(() => {
+    // Clear localStorage
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(USER_KEY);
+    
     setToken(null);
     setUser(null);
     apiClient.setToken(null);
