@@ -110,3 +110,7 @@ export class ApiClient {
 
 // Singleton instance
 export const apiClient = new ApiClient();
+
+export function setAuthToken(token: string | null) {
+  apiClient.setToken(token);
+}
