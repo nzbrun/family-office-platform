@@ -14,9 +14,14 @@ export interface ApiError {
 
 export class ApiClient {
   private token: string | null = null;
+  private onUnauthorized: (() => void) | null = null;
 
   setToken(token: string | null) {
     this.token = token;
+  }
+
+  setOnUnauthorized(callback: (() => void) | null) {
+    this.onUnauthorized = callback;
   }
 
   getToken(): string | null {
@@ -38,6 +43,14 @@ export class ApiClient {
       headers['Authorization'] = `Bearer ${this.token}`;
     }
 
+    // Add X-Tenant-Id header if tenant exists in localStorage
+    if (typeof window !== 'undefined') {
+      const tenantId = localStorage.getItem('fo.tenantId');
+      if (tenantId) {
+        headers['X-Tenant-Id'] = tenantId;
+      }
+    }
+
     try {
       const response = await fetch(url, {
         ...options,
@@ -47,11 +60,35 @@ export class ApiClient {
       // Handle 401 Unauthorized
       if (response.status === 401) {
         this.setToken(null);
-        // Redirect to login (will be handled by client-side navigation)
-        if (typeof window !== 'undefined') {
+        if (this.onUnauthorized) {
+          this.onUnauthorized();
+        } else if (typeof window !== 'undefined') {
           window.location.href = '/login';
         }
         throw new Error('Unauthorized');
+      }
+
+      // Handle 403 Forbidden
+      if (response.status === 403) {
+        const error = new Error('No autorizado') as Error & {
+          statusCode?: number;
+        };
+        error.statusCode = 403;
+        throw error;
+      }
+
+      // Handle 429 Too Many Requests
+      if (response.status === 429) {
+        const errorData = await response.json().catch(() => ({}));
+        const error = new Error('Demasiadas solicitudes. Por favor, intente más tarde.') as Error & {
+          statusCode?: number;
+          retryAfter?: number;
+        };
+        error.statusCode = 429;
+        if (errorData.retryAfter) {
+          error.retryAfter = errorData.retryAfter;
+        }
+        throw error;
       }
 
       if (!response.ok) {
@@ -113,4 +150,8 @@ export const apiClient = new ApiClient();
 
 export function setAuthToken(token: string | null) {
   apiClient.setToken(token);
+}
+
+export function setOnUnauthorized(callback: (() => void) | null) {
+  apiClient.setOnUnauthorized(callback);
 }

@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { apiClient } from '@/lib/api';
+import { setAuthToken, setOnUnauthorized } from '@/lib/api';
 import type { User, LoginRequest, LoginResponse } from '@/lib/auth';
 
 interface AuthContextType {
@@ -36,7 +36,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (storedToken) {
         setToken(storedToken);
-        apiClient.setAuthToken(storedToken);
+        setAuthToken(storedToken);
       }
     } catch (error) {
       // If there's an error, clear corrupted data
@@ -51,7 +51,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       localStorage.setItem(TOKEN_KEY, token);
     }
     setToken(token);
-    apiClient.setAuthToken(token);
+    setAuthToken(token);
     router.push('/');
   }, [router]);
 
@@ -61,9 +61,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     setToken(null);
     setUser(null);
-    apiClient.setAuthToken(null);
+    setAuthToken(null);
     router.push('/login');
   }, [router]);
+
+  // Configure onUnauthorized callback for apiClient
+  useEffect(() => {
+    setOnUnauthorized(() => {
+      logout();
+    });
+    return () => {
+      setOnUnauthorized(null);
+    };
+  }, [logout]);
 
   const value: AuthContextType = {
     user,
