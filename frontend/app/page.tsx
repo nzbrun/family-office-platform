@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useAuth } from '@/contexts/auth-context';
 import { ProtectedRoute } from '@/components/protected-route';
 import { Navbar } from '@/components/navbar';
 import { KPICard } from '@/components/kpi-card';
@@ -11,15 +10,12 @@ import { apiClient } from '@/lib/api';
 import type { ReportingSummary, AssetsResponse } from '@/types/reporting';
 
 export default function Home() {
-  const { isAuthenticated } = useAuth();
   const [summary, setSummary] = useState<ReportingSummary | null>(null);
   const [assets, setAssets] = useState<AssetsResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!isAuthenticated) return;
-
     const fetchData = async () => {
       setIsLoading(true);
       setError(null);
@@ -40,7 +36,7 @@ export default function Home() {
     };
 
     fetchData();
-  }, [isAuthenticated]);
+  }, []);
 
   const formatCurrency = (value: string, currency: string) => {
     const numValue = parseFloat(value);
