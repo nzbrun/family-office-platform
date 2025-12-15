@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { ProtectedRoute } from '@/components/protected-route';
 import { useAuth } from '@/contexts/auth-context';
 import { Button } from '@/components/ui/button';
@@ -13,6 +14,11 @@ import type { ReportingSummary, AssetsResponse } from '@/types/reporting';
 
 export default function DashboardPage() {
   const { logout } = useAuth();
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const page = parseInt(searchParams.get('page') || '1', 10);
+  const limit = parseInt(searchParams.get('limit') || '20', 10);
+  
   const [summary, setSummary] = useState<ReportingSummary | null>(null);
   const [assets, setAssets] = useState<AssetsResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -26,7 +32,7 @@ export default function DashboardPage() {
       try {
         const [summaryData, assetsData] = await Promise.all([
           apiClient.get<ReportingSummary>('/reporting/summary'),
-          apiClient.get<AssetsResponse>('/reporting/assets?page=1&limit=20'),
+          apiClient.get<AssetsResponse>(`/reporting/assets?page=${page}&limit=${limit}`),
         ]);
 
         setSummary(summaryData);
@@ -50,7 +56,7 @@ export default function DashboardPage() {
     };
 
     fetchData();
-  }, []);
+  }, [page, limit]);
 
   const formatCurrency = (value: string, currency: string) => {
     const numValue = parseFloat(value);
@@ -138,7 +144,38 @@ export default function DashboardPage() {
                     </p>
                   </div>
                   {assets ? (
-                    <AssetsTable assets={assets.data} />
+                    <>
+                      <AssetsTable assets={assets.data} />
+                      {assets.pagination.totalPages > 1 && (
+                        <div className="flex items-center justify-between">
+                          <Button
+                            variant="outline"
+                            disabled={page === 1}
+                            onClick={() => {
+                              const params = new URLSearchParams(searchParams.toString());
+                              params.set('page', String(page - 1));
+                              router.push(`/dashboard?${params.toString()}`);
+                            }}
+                          >
+                            Prev
+                          </Button>
+                          <span className="text-sm text-gray-600">
+                            Page {page} of {assets.pagination.totalPages}
+                          </span>
+                          <Button
+                            variant="outline"
+                            disabled={page >= assets.pagination.totalPages}
+                            onClick={() => {
+                              const params = new URLSearchParams(searchParams.toString());
+                              params.set('page', String(page + 1));
+                              router.push(`/dashboard?${params.toString()}`);
+                            }}
+                          >
+                            Next
+                          </Button>
+                        </div>
+                      )}
+                    </>
                   ) : (
                     <div className="rounded-md border p-8 text-center text-sm text-muted-foreground">
                       No assets available
