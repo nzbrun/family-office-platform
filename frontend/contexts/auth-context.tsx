@@ -8,83 +8,70 @@ import type { User, LoginRequest, LoginResponse } from '@/lib/auth';
 interface AuthContextType {
   user: User | null;
   token: string | null;
-  isLoading: boolean;
-  login: (credentials: LoginRequest) => Promise<void>;
+  loadingAuth: boolean;
+  login: (token: string) => void;
   logout: () => void;
   isAuthenticated: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const TOKEN_KEY = 'portfolio_manager_token';
-const USER_KEY = 'portfolio_manager_user';
+const TOKEN_KEY = 'fo.jwt';
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [loadingAuth, setLoadingAuth] = useState(true);
   const router = useRouter();
 
   // Initialize auth state from localStorage
   useEffect(() => {
+    if (typeof window === 'undefined') {
+      setLoadingAuth(false);
+      return;
+    }
+
     try {
       const storedToken = localStorage.getItem(TOKEN_KEY);
-      const storedUser = localStorage.getItem(USER_KEY);
 
-      if (storedToken && storedUser) {
-        const parsedUser = JSON.parse(storedUser) as User;
+      if (storedToken) {
         setToken(storedToken);
-        setUser(parsedUser);
-        apiClient.setToken(storedToken);
+        apiClient.setAuthToken(storedToken);
       }
     } catch (error) {
-      // If there's an error parsing, clear corrupted data
+      // If there's an error, clear corrupted data
       localStorage.removeItem(TOKEN_KEY);
-      localStorage.removeItem(USER_KEY);
     } finally {
-      setIsLoading(false);
+      setLoadingAuth(false);
     }
   }, []);
 
-  const login = useCallback(async (credentials: LoginRequest) => {
-    try {
-      const response = await apiClient.post<LoginResponse>(
-        '/auth/login',
-        credentials
-      );
-      
-      // Persist to localStorage
-      localStorage.setItem(TOKEN_KEY, response.access_token);
-      localStorage.setItem(USER_KEY, JSON.stringify(response.user));
-      
-      setToken(response.access_token);
-      setUser(response.user);
-      apiClient.setToken(response.access_token);
-      
-      router.push('/');
-    } catch (error) {
-      throw error;
+  const login = useCallback((token: string) => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(TOKEN_KEY, token);
     }
+    setToken(token);
+    apiClient.setAuthToken(token);
+    router.push('/');
   }, [router]);
 
   const logout = useCallback(() => {
-    // Clear localStorage
-    localStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem(USER_KEY);
-    
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem(TOKEN_KEY);
+    }
     setToken(null);
     setUser(null);
-    apiClient.setToken(null);
+    apiClient.setAuthToken(null);
     router.push('/login');
   }, [router]);
 
   const value: AuthContextType = {
     user,
     token,
-    isLoading,
+    loadingAuth,
     login,
     logout,
-    isAuthenticated: !!token && !!user,
+    isAuthenticated: !!token,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
