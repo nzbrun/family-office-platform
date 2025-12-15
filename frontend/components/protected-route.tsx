@@ -9,16 +9,16 @@ interface ProtectedRouteProps {
 }
 
 export function ProtectedRoute({ children }: ProtectedRouteProps) {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, loadingAuth } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
-    if (!isLoading && !isAuthenticated) {
-      router.push('/login');
+    if (!loadingAuth && !isAuthenticated) {
+      router.replace('/login');
     }
-  }, [isAuthenticated, isLoading, router]);
+  }, [isAuthenticated, loadingAuth, router]);
 
-  if (isLoading) {
+  if (loadingAuth) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <div className="text-center">
