@@ -17,6 +17,7 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 const TOKEN_KEY = 'fo.jwt';
+const TENANT_KEY = 'fo.tenantId';
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -41,6 +42,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch (error) {
       // If there's an error, clear corrupted data
       localStorage.removeItem(TOKEN_KEY);
+      localStorage.removeItem(TENANT_KEY);
     } finally {
       setLoadingAuth(false);
     }
@@ -58,6 +60,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const logout = useCallback(() => {
     if (typeof window !== 'undefined') {
       localStorage.removeItem(TOKEN_KEY);
+      localStorage.removeItem(TENANT_KEY);
     }
     setToken(null);
     setUser(null);
