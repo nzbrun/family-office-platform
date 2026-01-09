@@ -1,8 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { useAuth } from '@/contexts/auth-context';
+import { ProtectedRoute } from '@/components/protected-route';
 import { Navbar } from '@/components/navbar';
 import { KPICard } from '@/components/kpi-card';
 import { AssetsTable } from '@/components/assets-table';
@@ -11,22 +10,12 @@ import { apiClient } from '@/lib/api';
 import type { ReportingSummary, AssetsResponse } from '@/types/reporting';
 
 export default function Home() {
-  const { isAuthenticated, isLoading: authLoading } = useAuth();
-  const router = useRouter();
   const [summary, setSummary] = useState<ReportingSummary | null>(null);
   const [assets, setAssets] = useState<AssetsResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!authLoading && !isAuthenticated) {
-      router.push('/login');
-    }
-  }, [isAuthenticated, authLoading, router]);
-
-  useEffect(() => {
-    if (!isAuthenticated || authLoading) return;
-
     const fetchData = async () => {
       setIsLoading(true);
       setError(null);
@@ -47,22 +36,7 @@ export default function Home() {
     };
 
     fetchData();
-  }, [isAuthenticated, authLoading]);
-
-  if (authLoading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <div className="text-center">
-          <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-current border-r-transparent"></div>
-          <p className="mt-2 text-sm text-gray-600">Loading...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (!isAuthenticated) {
-    return null;
-  }
+  }, []);
 
   const formatCurrency = (value: string, currency: string) => {
     const numValue = parseFloat(value);
@@ -75,7 +49,8 @@ export default function Home() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <ProtectedRoute>
+      <div className="min-h-screen bg-gray-50">
       <Navbar />
       <main className="container mx-auto px-4 py-8">
         <div className="space-y-6">
@@ -150,5 +125,6 @@ export default function Home() {
         </div>
       </main>
     </div>
+    </ProtectedRoute>
   );
 }
